@@ -20,7 +20,7 @@ class PrimalPivotingStrategy(ABC):
         self,
         problem: LpProblem,
         basis: jaxtyping.Int[ArrayI, " m"],
-        basis_factorization: linear_algebra.ForrestTomlinFactorization,
+        basis_factorization: linear_algebra.ProductFormFactorization,
     ) -> None:
         """
         Gives stateful pivoting strategies a chance to reset for a new LP/basis.
@@ -58,7 +58,7 @@ class PrimalPivotingStrategy(ABC):
         basis: jaxtyping.Int[ArrayI, " m"],
         x_basis: jaxtyping.Float[ArrayF, " m"],
         basic_direction: jaxtyping.Float[ArrayF, " m"],
-        basis_factorization: linear_algebra.ForrestTomlinFactorization,
+        basis_factorization: linear_algebra.ProductFormFactorization,
     ) -> int:
         """
         Selects the index exiting the basis.
@@ -87,7 +87,7 @@ class DualPivotingStrategy(ABC):
         self,
         problem: LpProblem,
         basis: jaxtyping.Int[ArrayI, " m"],
-        basis_factorization: linear_algebra.ForrestTomlinFactorization,
+        basis_factorization: linear_algebra.ProductFormFactorization,
     ) -> None:
         """
         Gives stateful pivoting strategies a chance to reset for a new LP/basis.
@@ -100,7 +100,7 @@ class DualPivotingStrategy(ABC):
         self,
         primal_vars: jaxtyping.Float[ArrayF, " m"],
         basic_vars: jaxtyping.Int[ArrayI, " m"],
-        basis_factorization: linear_algebra.ForrestTomlinFactorization,
+        basis_factorization: linear_algebra.ProductFormFactorization,
     ) -> int:
         """
         TODO(martins): Describe purpose of picking entering index
@@ -165,7 +165,7 @@ class BlandsRule(PrimalPivotingStrategy):
         basis: jaxtyping.Int[ArrayI, " m"],
         x_basis: jaxtyping.Float[ArrayF, " m"],
         basic_direction: jaxtyping.Float[ArrayF, " m"],
-        basis_factorization: linear_algebra.ForrestTomlinFactorization,
+        basis_factorization: linear_algebra.ProductFormFactorization,
     ) -> int:
         return index_of_smallest_ratio(basis, x_basis, basic_direction)
 
@@ -195,7 +195,7 @@ class DantzigsRule(PrimalPivotingStrategy):
         basis: jaxtyping.Int[ArrayI, " m"],
         x_basis: jaxtyping.Float[ArrayF, " m"],
         basic_direction: jaxtyping.Float[ArrayF, " m"],
-        basis_factorization: linear_algebra.ForrestTomlinFactorization,
+        basis_factorization: linear_algebra.ProductFormFactorization,
     ) -> int:
         return index_of_smallest_ratio(basis, x_basis, basic_direction)
 
@@ -217,7 +217,7 @@ class SteepestEdgeRule(PrimalPivotingStrategy):
             self.initialize(
                 problem,
                 initial_basis,
-                linear_algebra.ForrestTomlinFactorization(
+                linear_algebra.ProductFormFactorization(
                     problem.constraint_matrix[:, initial_basis]
                 ),
             )
@@ -227,7 +227,7 @@ class SteepestEdgeRule(PrimalPivotingStrategy):
         self,
         problem: LpProblem,
         basis: jaxtyping.Int[ArrayI, " m"],
-        basis_factorization: linear_algebra.ForrestTomlinFactorization,
+        basis_factorization: linear_algebra.ProductFormFactorization,
     ) -> None:
         self.problem = problem
         self.entering_index = -1
@@ -256,7 +256,7 @@ class SteepestEdgeRule(PrimalPivotingStrategy):
         self,
         exiting_index: int,
         basis: jaxtyping.Int[ArrayI, " m"],
-        basis_factorization: linear_algebra.ForrestTomlinFactorization,
+        basis_factorization: linear_algebra.ProductFormFactorization,
         basic_direction: jaxtyping.Float[ArrayF, " m"],
     ) -> None:
         if self.problem is None:
@@ -337,7 +337,7 @@ class SteepestEdgeRule(PrimalPivotingStrategy):
         basis: jaxtyping.Int[ArrayI, " m"],
         x_basis: jaxtyping.Float[ArrayF, " m"],
         basic_direction: jaxtyping.Float[ArrayF, " m"],
-        basis_factorization: linear_algebra.ForrestTomlinFactorization,
+        basis_factorization: linear_algebra.ProductFormFactorization,
     ) -> int:
         exiting_index = index_of_smallest_ratio(basis, x_basis, basic_direction)
         self._update_eta(
@@ -356,7 +356,7 @@ class DualBlandsRule(DualPivotingStrategy):
         self,
         primal_vars: jaxtyping.Float[ArrayF, " m"],
         basic_vars: jaxtyping.Int[ArrayI, " m"],
-        basis_factorization: linear_algebra.ForrestTomlinFactorization,
+        basis_factorization: linear_algebra.ProductFormFactorization,
     ) -> int:
         negative_basic_vars = [
             (variable_index, basis_index, var)
@@ -383,7 +383,7 @@ class DualDantzigsRule(DualPivotingStrategy):
         self,
         primal_vars: jaxtyping.Float[ArrayF, " m"],
         basic_vars: jaxtyping.Int[ArrayI, " m"],
-        basis_factorization: linear_algebra.ForrestTomlinFactorization,
+        basis_factorization: linear_algebra.ProductFormFactorization,
     ) -> int:
         return int(np.argmin(primal_vars))
 
@@ -405,7 +405,7 @@ class DualSteepestEdgeRule(DualPivotingStrategy):
         self,
         primal_vars: jaxtyping.Float[ArrayF, " m"],
         basic_vars: jaxtyping.Int[ArrayI, " m"],
-        basis_factorization: linear_algebra.ForrestTomlinFactorization,
+        basis_factorization: linear_algebra.ProductFormFactorization,
     ) -> int:
         del basic_vars
         candidate_mask = primal_vars < -PIVOTING_TOLERANCE

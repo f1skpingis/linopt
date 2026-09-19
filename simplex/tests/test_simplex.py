@@ -59,7 +59,7 @@ class TestPrimalPivoting:
             basic_vars,
             x_basis,
             d,
-            linear_algebra.ForrestTomlinFactorization(np.eye(len(basic_vars))),
+            linear_algebra.ProductFormFactorization(np.eye(len(basic_vars))),
         )
         exiting_variable = basic_vars[exiting_index]
 
@@ -91,7 +91,7 @@ class TestSteepestEdgeRule:
         c = np.array([-4.0, -5.0, 0.0, 0.0])
         problem = lp_problem.LpProblem(a, b, c)
         basis = np.array([2, 3])
-        basis_factorization = linear_algebra.ForrestTomlinFactorization(
+        basis_factorization = linear_algebra.ProductFormFactorization(
             problem.constraint_matrix[:, basis]
         )
         x_basis = basis_factorization.ftran(problem.rhs)
@@ -160,7 +160,7 @@ class TestDualPivoting:
         result = piv_strat().pick_exiting_index(
             primal_vars,
             basic_vars,
-            linear_algebra.ForrestTomlinFactorization(np.eye(len(basic_vars))),
+            linear_algebra.ProductFormFactorization(np.eye(len(basic_vars))),
         )
         assert result == expected
 
@@ -168,7 +168,7 @@ class TestDualPivoting:
         primal_vars = np.array([-3.0, -4.0])
         basic_vars = np.array([10, 11])
         basis_matrix = np.array([[1.0, 0.0], [0.0, 0.1]])
-        basis_factorization = linear_algebra.ForrestTomlinFactorization(basis_matrix)
+        basis_factorization = linear_algebra.ProductFormFactorization(basis_matrix)
 
         result = pivoting_strategy.DualSteepestEdgeRule().pick_exiting_index(
             primal_vars, basic_vars, basis_factorization
@@ -473,7 +473,7 @@ class TestDualBlandsRule:
                 dual_blands_rule.pick_exiting_index(
                     primal_vars,
                     basis,
-                    linear_algebra.ForrestTomlinFactorization(np.eye(len(basis))),
+                    linear_algebra.ProductFormFactorization(np.eye(len(basis))),
                 )
             ]
             == 3
@@ -598,13 +598,12 @@ class TestDualPhaseOne:
             solver.solve(problem)
 
 
-class TestForrestTomlin:
-    # Follows the paper "Novel Update Techniques for the Revised Simplex Method" by
-    # Q. Huangfu and J. Hall.
+class TestProductFormFactorization:
+    """Exercise the PF backend against independently constructed basis matrices."""
 
     @staticmethod
     def _example_constraint_matrix_and_factorization() -> tuple[
-        np.ndarray, np.ndarray, linear_algebra.ForrestTomlinFactorization
+        np.ndarray, np.ndarray, linear_algebra.ProductFormFactorization
     ]:
         l_factor = np.array(
             [
@@ -629,134 +628,13 @@ class TestForrestTomlin:
             ]
         )
         constraint_matrix[:, basis] = l_factor @ u_factor
-        factorization = linear_algebra.ForrestTomlinFactorization.from_factors(
+        factorization = linear_algebra.ProductFormFactorization.from_factors(
             l_factor, u_factor
         )
 
         return constraint_matrix, basis, factorization
 
-    def test_one_forrest_tomlin_update_from_equation_11_to_13(self) -> None:
-        # This test intentionally uses dense matrices. The real implementation should
-        # store sparse eta vectors, but the dense form makes the algebra in the paper
-        # easy to see.
-        l_factor = np.array(
-            [
-                [1.0, 0.0, 0.0],
-                [2.0, 1.0, 0.0],
-                [-1.0, 3.0, 1.0],
-            ]
-        )
-        u_factor = np.array(
-            [
-                [2.0, -1.0, 4.0],
-                [0.0, 3.0, 5.0],
-                [0.0, 0.0, -2.0],
-            ]
-        )
-
-        basis = np.array([0, 2, 4])
-        entering_variable = 5
-        exiting_index = 1
-
-        # The current basis is B = L U.
-        basis_matrix = l_factor @ u_factor
-        constraint_matrix = np.array(
-            [
-                [0.0, 7.0, 0.0, 6.0, 0.0, 3.0],
-                [0.0, 8.0, 0.0, 5.0, 0.0, 11.0],
-                [0.0, 2.0, 0.0, 4.0, 0.0, -1.0],
-            ]
-        )
-        constraint_matrix[:, basis] = basis_matrix
-
-        assert l_factor @ u_factor == pytest.approx(constraint_matrix[:, basis])
-
-        # Pivot: replace basis column p by the entering column a_q.
-        updated_basis = basis.copy()
-        updated_basis[exiting_index] = entering_variable
-
-        # Equation 11:
-        #   L^-1 B_bar = U + (L^-1 a_q - U e_p) e_p^T = U0.
-        #
-        # So the basis pivot is expressed in U-space by replacing column p of U
-        # with the partial FTRAN result a_tilde_q = L^-1 a_q.
-        a_tilde_q = np.linalg.solve(l_factor, constraint_matrix[:, entering_variable])
-        assert a_tilde_q == pytest.approx(np.array([3.0, 5.0, -13.0]))
-
-        spiked_u = u_factor.copy()
-        spiked_u[:, exiting_index] = a_tilde_q
-        expected_spiked_u = np.array(
-            [
-                [2.0, 3.0, 4.0],
-                [0.0, 5.0, 5.0],
-                [0.0, -13.0, -2.0],
-            ]
-        )
-        assert spiked_u == pytest.approx(expected_spiked_u)
-        assert l_factor @ spiked_u == pytest.approx(constraint_matrix[:, updated_basis])
-
-        # Equation 12:
-        #   r^T = e_p^T - u_pp * e_tilde_p^T,
-        #   where e_tilde_p^T = e_p^T U^-1.
-        #
-        # The row eta R = I + e_p r^T has pivot 1, so R^-1 = I - e_p r^T.
-        # Applying R^-1 is a row operation: it changes only row p.
-        unit_p = np.eye(3)[exiting_index]
-        partial_btran = unit_p @ np.linalg.inv(u_factor)
-        pivot_in_u = u_factor[exiting_index, exiting_index]
-
-        row_eta_vector = unit_p - pivot_in_u * partial_btran
-        row_eta_vector[exiting_index] = 0.0
-        assert row_eta_vector == pytest.approx(np.array([0.0, 0.0, -2.5]))
-
-        row_eta = np.eye(3) + np.outer(unit_p, row_eta_vector)
-        row_eta_inverse = np.eye(3) - np.outer(unit_p, row_eta_vector)
-        assert row_eta @ row_eta_inverse == pytest.approx(np.eye(3))
-
-        # R^-1 U eliminates the off-diagonal entries in row p of the old U.
-        assert row_eta_inverse @ u_factor == pytest.approx(
-            np.array(
-                [
-                    [2.0, -1.0, 4.0],
-                    [0.0, 3.0, 0.0],
-                    [0.0, 0.0, -2.0],
-                ]
-            )
-        )
-
-        # Applying the same row operation to U0 gives U_bar. In the paper this is
-        # "permuted triangular": the off-diagonal entries of row p are gone, while
-        # the spike lives in column p below the diagonal.
-        u_bar = row_eta_inverse @ spiked_u
-        assert u_bar == pytest.approx(
-            np.array(
-                [
-                    [2.0, 3.0, 4.0],
-                    [0.0, -27.5, 0.0],
-                    [0.0, -13.0, -2.0],
-                ]
-            )
-        )
-
-        # Equation 13 for one update:
-        #   B_bar = L R U_bar
-        #   B_bar^-1 = U_bar^-1 R^-1 L^-1.
-        #
-        # Since U_bar = R^-1 U0, this stores the same updated basis matrix
-        # without refactorizing B_bar from scratch.
-        updated_basis_matrix = constraint_matrix[:, updated_basis]
-        assert l_factor @ row_eta @ u_bar == pytest.approx(updated_basis_matrix)
-        assert np.linalg.inv(u_bar) @ row_eta_inverse @ np.linalg.inv(
-            l_factor
-        ) == pytest.approx(np.linalg.inv(updated_basis_matrix))
-
-        # This is the same final basis matrix we would get from directly replacing
-        # column p of B by a_q. The value above is the factorized representation.
-        direct_basis_matrix = basis_matrix.copy()
-        direct_basis_matrix[:, exiting_index] = constraint_matrix[:, entering_variable]
-        assert direct_basis_matrix == pytest.approx(constraint_matrix[:, updated_basis])
-
-    def test_forrest_tomlin_factorization_solves_initial_basis(self) -> None:
+    def test_product_form_factorization_solves_initial_basis(self) -> None:
         (
             constraint_matrix,
             basis,
@@ -775,7 +653,7 @@ class TestForrestTomlin:
             np.linalg.solve(basis_matrix.T, rhs)
         )
 
-    def test_forrest_tomlin_factorization_solves_after_one_update(self) -> None:
+    def test_product_form_factorization_solves_after_one_update(self) -> None:
         (
             constraint_matrix,
             basis,
@@ -793,7 +671,6 @@ class TestForrestTomlin:
         rhs = np.array([1.0, -2.0, 3.0])
 
         assert factorization.to_matrix() == pytest.approx(updated_basis_matrix)
-        assert factorization.u_etas[0].index == exiting_index
         assert factorization.ftran(rhs) == pytest.approx(
             np.linalg.solve(updated_basis_matrix, rhs)
         )
@@ -801,7 +678,7 @@ class TestForrestTomlin:
             np.linalg.solve(updated_basis_matrix.T, rhs)
         )
 
-    def test_forrest_tomlin_factorization_solves_after_multiple_updates(self) -> None:
+    def test_product_form_factorization_solves_after_multiple_updates(self) -> None:
         (
             constraint_matrix,
             basis,
@@ -812,8 +689,8 @@ class TestForrestTomlin:
         basis[1] = 5
 
         # The second update must transform its entering column through the existing
-        # U eta stack before appending the next eta column. That is the path future
-        # simplex code relies on after the first pivot.
+        # basis eta stack before appending the next eta column. Both simplex
+        # solvers rely on this after the first pivot.
         factorization.update(constraint_matrix[:, 1], exiting_index=2)
         basis[2] = 1
 

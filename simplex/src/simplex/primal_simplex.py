@@ -27,7 +27,7 @@ LOG_INTERVAL = 100
 
 def is_linearly_independent(
     problem: lp_problem.LpProblem,
-    basis_factorization: linear_algebra.ForrestTomlinFactorization,
+    basis_factorization: linear_algebra.ProductFormFactorization,
     entering_var: int,
     exiting_index: int,
 ) -> bool:
@@ -46,7 +46,7 @@ def purge_aux_vars(
 ) -> jaxtyping.Int[ArrayI, " m"]:
     aux_vars_still_in_basis = [b for b in basis if not b < num_variables]
     if aux_vars_still_in_basis:
-        basis_factorization = linear_algebra.ForrestTomlinFactorization(
+        basis_factorization = linear_algebra.ProductFormFactorization(
             problem.constraint_matrix[:, basis]
         )
 
@@ -152,7 +152,7 @@ class PrimalSimplex:
         problem: lp_problem.LpProblem,
         basis: jaxtyping.Int[ArrayI, " m"],
         non_basic_vars: jaxtyping.Int[ArrayI, " num_nonbasic"],
-        basis_factorization: linear_algebra.ForrestTomlinFactorization,
+        basis_factorization: linear_algebra.ProductFormFactorization,
     ) -> jaxtyping.Float[ArrayF, " num_nonbasic"]:
         lambda_t = basis_factorization.btran(problem.objective[basis])
         all_dual_constraint_values = np.asarray(
@@ -198,7 +198,7 @@ class PrimalSimplex:
                 ) from e
         non_basic_vars = get_non_basic_vars(problem.num_variables, basis)
 
-        basis_factorization = linear_algebra.ForrestTomlinFactorization(
+        basis_factorization = linear_algebra.ProductFormFactorization(
             problem.constraint_matrix[:, basis]
         )
         self.pivoting_strategy_.initialize(problem, basis, basis_factorization)
@@ -242,7 +242,7 @@ class PrimalSimplex:
 
             if iteration % INVERSE_RECOMPUTE_INTERVAL == 0:
                 non_basic_vars = get_non_basic_vars(problem.num_variables, basis)
-                basis_factorization = linear_algebra.ForrestTomlinFactorization(
+                basis_factorization = linear_algebra.ProductFormFactorization(
                     problem.constraint_matrix[:, basis]
                 )
                 self.pivoting_strategy_.initialize(problem, basis, basis_factorization)

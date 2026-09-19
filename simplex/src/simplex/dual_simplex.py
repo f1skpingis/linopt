@@ -169,7 +169,7 @@ class DualSimplex:
 
         basis = np.array(initial_basis)
         non_basic_vars = get_non_basic_vars(problem.num_variables, basis)
-        basis_factorization = linear_algebra.ForrestTomlinFactorization(
+        basis_factorization = linear_algebra.ProductFormFactorization(
             problem.constraint_matrix[:, basis]
         )
         x_basis = basis_factorization.ftran(problem.rhs)
@@ -227,7 +227,7 @@ class DualSimplex:
             non_basic_vars[entering_index] = basis[exiting_index]
             basis[exiting_index] = entering_variable
             if iteration % INVERSE_RECOMPUTE_INTERVAL == 0:
-                basis_factorization = linear_algebra.ForrestTomlinFactorization(
+                basis_factorization = linear_algebra.ProductFormFactorization(
                     problem.constraint_matrix[:, basis]
                 )
                 self.pivoting_strategy_.initialize(problem, basis, basis_factorization)
