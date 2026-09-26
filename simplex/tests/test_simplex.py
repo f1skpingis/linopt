@@ -620,6 +620,8 @@ class TestProductFormFactorization:
             ]
         )
         basis = np.array([0, 2, 4])
+
+        # Left zeros in the basis elements so they can be filled in
         constraint_matrix = np.array(
             [
                 [0.0, 7.0, 0.0, 6.0, 0.0, 3.0],

@@ -1,5 +1,11 @@
 # Simplex Algorithm Implementation
 
+For the current implementation, start with the
+[simplex state and catch-up guide](../books/simplex-state-and-guide.md) and
+[Forrest-Tomlin TODO](../books/forresttomlintodo.md), audited on 2026-09-13.
+The assignment description below is historical and refers to older filenames
+and inverse-update tasks.
+
 ## Introduction
 
 Welcome to the Simplex Algorithm programming assignment! The goal of this assignment is to implement a robust version of the revised simplex method for solving linear programming problems on standard form:
