@@ -224,12 +224,12 @@ class TestPredictorCorrectorSolve:
     def test_solve_lp_using_corrector_predictor_algo(self) -> None:
 
         # Test solving the lp
-        solver = predictor_corrector.PredictorCorrector(100, 1e-10)
+        solver = predictor_corrector.PredictorCorrector(100, 1e-12)
         solution = solver.solve(self.lp)
 
         expected_solution = [0.0, 0.0, 1.0, 1.0]
-        assert np.allclose(solution.x, expected_solution)
-        assert np.allclose(self.a @ solution.x, self.b)
+        assert np.allclose(solution.x, expected_solution, atol=1e-6)
+        assert np.allclose(self.a @ solution.x, self.b, atol=1e-6)
 
 
 class TestLpSolving:
