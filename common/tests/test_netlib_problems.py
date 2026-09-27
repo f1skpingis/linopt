@@ -1,4 +1,5 @@
 import numpy as np
+from pdhg import pdlp
 import pytest
 
 from common import lp_problem
@@ -95,17 +96,26 @@ def cached_lp_problems() -> dict[str, lp_problem.LpProblem]:
 
 
 def get_problem(
-    name: str, cache: dict[str, lp_problem.LpProblem]
+    name: str,
+    cache: dict[str, lp_problem.LpProblem],
 ) -> lp_problem.LpProblem:
-    """Helper to fetch or download/parse a Netlib problem."""
     if name not in cache:
         res = load_netlib_problems.download_and_parse_mps(name)
         assert res is not None, f"Failed to download/parse {name}"
+
         a, b, c, row_types, _, _ = res
+
         a_std, b_std, c_std = load_netlib_problems.convert_to_standard_form(
             a, b, c, row_types
         )
-        cache[name] = lp_problem.LpProblem(a_std, b_std, c_std)
+
+        cache[name] = lp_problem.LpProblem(
+            constraint_matrix=a_std,
+            rhs=b_std,
+            objective=c_std,
+            lower_bounds=np.zeros_like(c_std),
+        )
+
     return cache[name]
 
 
@@ -157,6 +167,29 @@ def test_netlib_dual_simplex(
     solution = dual_simplex_solver.solve(lp, max_iterations=iters)
 
     obtained_optimum = float(lp.objective.T @ solution.solution)
+    assert np.isclose(obtained_optimum, optimum)
+
+
+# AFIRO — vanilla PDHG
+# tol=1e-4   15,200 iterations   0.18 s
+# tol=1e-6   19,200 iterations   0.23 s
+# tol=1e-8   23,800 iterations   0.27 s
+@pytest.mark.parametrize("name", PROBLEMS_TO_TEST)
+def test_netlib_pdhg(
+    name: str, cached_lp_problems: dict[str, lp_problem.LpProblem]
+) -> None:
+    """Test the Dual Simplex solver on a Netlib problem."""
+    lp = get_problem(name, cached_lp_problems)
+    optimum = NETLIB_SOLUTIONS[name]["optimum"]
+    iters = int(NETLIB_SOLUTIONS[name].get("simplex_iters", 1000))
+
+    pdhg_solver = pdlp.PdlpSolver()
+    y_size, x_size = lp.constraint_matrix.shape
+    x = np.zeros(x_size)
+    y = np.zeros(y_size)
+    solution = pdhg_solver.solve(lp, (x, y), max_iterations=iters * 1000)
+
+    obtained_optimum = float(lp.objective.T @ solution[0])
     assert np.isclose(obtained_optimum, optimum)
 
 

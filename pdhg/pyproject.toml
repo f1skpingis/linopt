@@ -1,0 +1,82 @@
+[project]
+name = "pdhg"
+version = "0.1.0"
+description = "Primal Dual Hybrid Gradient for LP"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "common",
+    "jaxtyping>=0.3.9",
+    "numpy>=2.4.2",
+    "scipy>=1.15.2",
+]
+
+
+[build-system]
+requires = ["uv_build>=0.9.24,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [{ include-group = "lint" }, { include-group = "test" }]
+lint = ["mypy>=1.19.1", "ruff>=0.14.13"]
+test = ["pytest>=9.0.2"]
+
+[tool.mypy]
+strict = true
+ignore_missing_imports = true
+mypy_path = "src"
+explicit_package_bases = true
+files = ["src", "tests"]
+
+[tool.ruff]
+line-length = 88    # default in black
+exclude = [".venv"]
+
+lint.select = [
+    "C90",   # mccabe
+    "A",     # flake8-builtins
+    "ASYNC", # flake8-async
+    "ANN",   # flake8-annotations
+    "F",     # Pyflakes
+    "E",     # pycodestyle
+    "W",     # pycodestyle
+    "N",     # pep8-naming
+    "I",     # isort
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "TCH",   # lake8-type-checking
+    "PL",    # Pylint
+    "RSE",   # flake8-raise
+    "LOG",   # flake8-logging
+    "PTH",   # flake8-use-pathlib
+    "TD",    # flake8-todos
+    "FIX",   # flake8-fixme (FIX)
+    "S",     # flake8-bandit
+    "TID",   # flake8-tidy-imports
+    "TRY",   # tryceratops
+    "RUF",   # Ruff-specific rules
+    "PD",    # pandas-vet
+    "NPY",   # NumPy-specific rules
+]
+
+lint.ignore = [
+    "TD003",  # skip mandatory reference to ticket of todos
+    "FIX002", # overlaps with TD
+    "TRY003", # don't enforce creating a separate error class for each error message
+    "E501",   # ignore line length violations
+    "F722",   # Syntax error in forward annotation: Unexpected token at the end of an expression. To support jaxtyping https://docs.kidger.site/jaxtyping/faq/#flake8-or-ruff-are-throwing-an-error
+]
+
+[tool.ruff.lint.flake8-tidy-imports]
+# Disallow all relative imports.
+ban-relative-imports = "all"
+
+[tool.ruff.lint.per-file-ignores]
+"**/test_*.py" = [
+    "S101",    # asserts allowed in tests. This is since old.
+    "B011",    # same as S101
+    "PLR2004", # allow comparing with hardcoded values in tests
+]
+
+[tool.uv.sources]
+common = { workspace = true }

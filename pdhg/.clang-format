@@ -1,8 +1,0 @@
-BasedOnStyle: Google
-Standard: c++20
-ColumnLimit: 88
-IndentWidth: 2
-ContinuationIndentWidth: 4
-DerivePointerAlignment: false
-PointerAlignment: Left
-SortIncludes: true

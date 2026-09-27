@@ -1,5 +1,5 @@
 [tool.uv.workspace]
-members = ["ipm", "simplex", "common"]
+members = ["ipm", "simplex", "common", "pdhg"]
 
 [project]
 name = "linopt"
@@ -13,6 +13,7 @@ dependencies = [
     "scikit-umfpack>=0.4.2",
     "scipy>=1.17.1",
     "simplex",
+    "pdhg",
 ]
 
 [dependency-groups]
@@ -26,12 +27,12 @@ dev = [
 common = { workspace = true }
 ipm = { workspace = true }
 simplex = { workspace = true }
+pdhg = { workspace = true }
 
 [tool.pytest.ini_options]
-testpaths = ["common/tests", "ipm/tests", "simplex/tests"]
+testpaths = ["common/tests", "ipm/tests", "simplex/tests", "pdhg/tests"]
 addopts = "-ra -v"
-pythonpath = ["ipm/src", "simplex/src", "common/src"]
-norecursedirs = ["pdhg"]
+pythonpath = ["ipm/src", "simplex/src", "common/src", "pdhg/src"]
 
 [tool.mypy]
 strict = true
