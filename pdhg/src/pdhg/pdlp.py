@@ -72,7 +72,7 @@ class PdlpSolver:
         )
         start = time.time()
         for iteration in range(max_iterations):
-            metrics: pdhg_tools.PdhgOptimalityMetrics | None
+            metrics: pdhg_tools.PdhgOptimalityMetrics | None = None
             old_x = x.copy()
 
             # TODO(martins): Put these operations in their own functions

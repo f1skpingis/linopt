@@ -2,11 +2,10 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
 
-from common import lp_problem
 import numpy as np
+from common import lp_problem
 from common.numpy_type_aliases import ArrayF
 from numpy.typing import NDArray
-
 
 LOG_INTERVAL = 100
 LOG_FIRST_ITERATIONS = 10
@@ -15,7 +14,6 @@ OPTIMALITY_CHECK_INTERVAL = 20
 CRUDE_OPTIMALITY_TOLERANCE = 1e-4
 MODERATE_OPTIMALITY_TOLERANCE = 1e-6
 ACCURATE_OPTIMALITY_TOLERANCE = 1e-8
-
 
 
 @dataclass(frozen=True)
@@ -174,11 +172,14 @@ def compute_dual_objective(
 ) -> float:
     finite_lower_bounds = lower_bounds > -np.inf
     finite_upper_bounds = upper_bounds < np.inf
+
+    lam_minus = -np.minimum(0.0, lam[finite_upper_bounds])
+    lam_plus = np.maximum(0.0, lam[finite_lower_bounds])
+
     return float(
         q.T @ y
-        + lower_bounds[finite_lower_bounds].T
-        @ np.maximum(0.0, lam[finite_lower_bounds])
-        - upper_bounds[finite_upper_bounds] @ np.minimum(0.0, lam[finite_upper_bounds])
+        + lower_bounds[finite_lower_bounds].T @ lam_plus
+        - upper_bounds[finite_upper_bounds] @ lam_minus
     )
 
 

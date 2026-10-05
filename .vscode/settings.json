@@ -13,9 +13,7 @@
     "files.associations": {
         "*.metal": "cpp"
     },
-    "python.testing.pytestArgs": [
-        "simplex"
-    ],
+    "python.testing.pytestArgs": [],
     "python.testing.unittestEnabled": false,
     "python.testing.pytestEnabled": true
 }
