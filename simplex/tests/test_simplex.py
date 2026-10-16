@@ -72,7 +72,7 @@ class TestSteepestEdgeRule:
         a = np.array([[1.0, 2.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]])
         b = np.array([4.0, 2.0])
         c = np.array([-4.0, -5.0, 0.0, 0.0])
-        problem = lp_problem.LpProblem(a, b, c)
+        problem = lp_problem.StandardFormLP(a, b, c)
         basis = np.array([2, 3])
 
         rule = pivoting_strategy.SteepestEdgeRule(problem, basis)
@@ -89,7 +89,7 @@ class TestSteepestEdgeRule:
         a = np.array([[1.0, 2.0, 1.0, 0.0], [0.0, 1.0, 0.0, 1.0]])
         b = np.array([4.0, 2.0])
         c = np.array([-4.0, -5.0, 0.0, 0.0])
-        problem = lp_problem.LpProblem(a, b, c)
+        problem = lp_problem.StandardFormLP(a, b, c)
         basis = np.array([2, 3])
         basis_factorization = linear_algebra.ProductFormFactorization(
             problem.constraint_matrix[:, basis]
@@ -123,7 +123,7 @@ class TestSteepestEdgeRule:
         assert rule.norm_eta_squared == pytest.approx(expected_norms)
 
     def test_solve_with_steepest_edge_and_initial_basis(
-        self, example_problem_35: lp_problem.LpProblem
+        self, example_problem_35: lp_problem.StandardFormLP
     ) -> None:
         solve_result = primal_simplex.PrimalSimplex(
             pivot_strategy=pivoting_strategy.SteepestEdgeRule()
@@ -134,7 +134,7 @@ class TestSteepestEdgeRule:
         assert solve_result.objective_value == pytest.approx(-136)
 
     def test_solve_with_steepest_edge_without_initial_basis(
-        self, example_problem_131: tuple[lp_problem.LpProblem, ArrayI]
+        self, example_problem_131: tuple[lp_problem.StandardFormLP, ArrayI]
     ) -> None:
         solve_result = primal_simplex.PrimalSimplex(
             pivot_strategy=pivoting_strategy.SteepestEdgeRule()
@@ -269,7 +269,7 @@ class TestInverseComputation:
 
 
 @pytest.fixture()
-def example_problem_35() -> lp_problem.LpProblem:
+def example_problem_35() -> lp_problem.StandardFormLP:
     """Example 3.5 in "Introduction to Linear Programming", page 101."""
     a = np.array(
         [
@@ -284,11 +284,11 @@ def example_problem_35() -> lp_problem.LpProblem:
 
     c = np.array([-10, -12, -12, 0, 0, 0], dtype=np.float64)
 
-    return lp_problem.LpProblem(a, b, c)
+    return lp_problem.StandardFormLP(a, b, c)
 
 
 @pytest.fixture()
-def example_problem_131() -> tuple[lp_problem.LpProblem, ArrayI]:
+def example_problem_131() -> tuple[lp_problem.StandardFormLP, ArrayI]:
     """Example 13.1 in "Introduction to Linear Programming", page 371."""
     a = np.array(
         [
@@ -301,11 +301,11 @@ def example_problem_131() -> tuple[lp_problem.LpProblem, ArrayI]:
 
     initial_basis = np.array([2, 3])
 
-    return lp_problem.LpProblem(a, b, c), initial_basis
+    return lp_problem.StandardFormLP(a, b, c), initial_basis
 
 
 @pytest.fixture()
-def problem_with_auxvars_left_in_basis() -> lp_problem.LpProblem:
+def problem_with_auxvars_left_in_basis() -> lp_problem.StandardFormLP:
     a = np.array(
         [  # These three at the end are aux
             [1.0, 1.0, 0.0, 1.0, 0.0, 0.0],
@@ -315,12 +315,12 @@ def problem_with_auxvars_left_in_basis() -> lp_problem.LpProblem:
     )
     b = np.array([0.0, 0.0, 0.0])
     c = np.array([0.0, 0.0, 0.0, 1.0, 1.0, 1.0])
-    return lp_problem.LpProblem(a, b, c)
+    return lp_problem.StandardFormLP(a, b, c)
 
 
 class TestFindingInitialBasis:
     def test_pivot_out_auxiliary(
-        self, problem_with_auxvars_left_in_basis: lp_problem.LpProblem
+        self, problem_with_auxvars_left_in_basis: lp_problem.StandardFormLP
     ) -> None:
         basis = primal_simplex.purge_aux_vars(
             problem_with_auxvars_left_in_basis, np.array([3, 4, 5]), 3
@@ -330,7 +330,7 @@ class TestFindingInitialBasis:
 
 class TestSolver:
     def test_problem_with_start_solution(
-        self, example_problem_35: lp_problem.LpProblem
+        self, example_problem_35: lp_problem.StandardFormLP
     ) -> None:
         # Starting basis.
         basis = np.array([3, 4, 5])
@@ -352,7 +352,9 @@ class TestSolver:
         assert solve_result.solution == pytest.approx(np.array([4, 4, 4, 0, 0, 0]))
         assert solve_result.objective_value == pytest.approx(-136)
 
-    def test_find_initial_basis(self, example_problem_35: lp_problem.LpProblem) -> None:
+    def test_find_initial_basis(
+        self, example_problem_35: lp_problem.StandardFormLP
+    ) -> None:
         assert sorted(
             primal_simplex.PrimalSimplex().find_initial_basis(example_problem_35)
         ) == [
@@ -362,7 +364,7 @@ class TestSolver:
         ]
 
     def test_problem_without_start_solution(
-        self, example_problem_35: lp_problem.LpProblem
+        self, example_problem_35: lp_problem.StandardFormLP
     ) -> None:
         solve_result = primal_simplex.PrimalSimplex().solve(example_problem_35)
 
@@ -390,11 +392,11 @@ class TestSolver:
             SimplexCyclingError, match="Basis cycle of length 6 detected"
         ):
             primal_simplex.PrimalSimplex(pivoting_strategy.DantzigsRule()).solve(
-                lp_problem.LpProblem(a, b, c), initial_basis=initial_basis
+                lp_problem.StandardFormLP(a, b, c), initial_basis=initial_basis
             )
 
         assert primal_simplex.PrimalSimplex(pivoting_strategy.BlandsRule()).solve(
-            lp_problem.LpProblem(a, b, c), initial_basis=initial_basis
+            lp_problem.StandardFormLP(a, b, c), initial_basis=initial_basis
         ).objective_value == pytest.approx(-1.0)
 
     @pytest.mark.parametrize(
@@ -410,7 +412,7 @@ class TestSolver:
         b = np.array([1, 2], dtype=float)
         c = np.array([-1, 0, 0], dtype=float)
 
-        test_problem = lp_problem.LpProblem(a, b, c)
+        test_problem = lp_problem.StandardFormLP(a, b, c)
         with pytest.raises(InfeasibleLpError):
             solver().solve(test_problem)
 
@@ -427,12 +429,12 @@ class TestSolver:
         b = np.array([10, 40], dtype=float)
         c = np.array([-2, -1, 0, 0], dtype=float)
 
-        test_problem = lp_problem.LpProblem(a, b, c)
+        test_problem = lp_problem.StandardFormLP(a, b, c)
         with pytest.raises(UnboundedLpError):
             solver().solve(test_problem)
 
     def test_example_13_1_from_book(
-        self, example_problem_131: tuple[lp_problem.LpProblem, ArrayI]
+        self, example_problem_131: tuple[lp_problem.StandardFormLP, ArrayI]
     ) -> None:
         # Lukas spotted typo in book, test to verify!
         simplex_solver = primal_simplex.PrimalSimplex()
@@ -451,7 +453,7 @@ class TestSolver:
     )
     def test_example_13_1_from_book_without_initial_basis(
         self,
-        example_problem_131: tuple[lp_problem.LpProblem, ArrayI],
+        example_problem_131: tuple[lp_problem.StandardFormLP, ArrayI],
         strategy: type[pivoting_strategy.PrimalPivotingStrategy],
     ) -> None:
         solve_result = primal_simplex.PrimalSimplex(pivot_strategy=strategy()).solve(
@@ -495,7 +497,7 @@ class TestDualBlandsRule:
 
 class TestDualSolve:
     def test_problem_without_start_solution_with_steepest_edge(
-        self, example_problem_35: lp_problem.LpProblem
+        self, example_problem_35: lp_problem.StandardFormLP
     ) -> None:
         solve_result = dual_simplex.DualSimplex(
             pivot_strategy=pivoting_strategy.DualSteepestEdgeRule()
@@ -506,7 +508,7 @@ class TestDualSolve:
         assert solve_result.objective_value == pytest.approx(-136)
 
     def test_problem_without_start_solution(
-        self, example_problem_35: lp_problem.LpProblem
+        self, example_problem_35: lp_problem.StandardFormLP
     ) -> None:
         # The optimal basis for problem 35 is 0, 1, 2.
         # This corresponds to solution 4, 4, 4, 0, 0, 0
@@ -528,7 +530,9 @@ class TestDualSolve:
         a[-1, :] = np.array([1, 3, 3, 0, 0, 0, 1])
         c = np.pad(c, (0, 1))
         b = np.pad(b, (0, 1), constant_values=4.0)
-        amended_problem = lp_problem.LpProblem(constraint_matrix=a, rhs=b, objective=c)
+        amended_problem = lp_problem.StandardFormLP(
+            constraint_matrix=a, rhs=b, objective=c
+        )
 
         solution_by_primal = primal_simplex.PrimalSimplex(
             pivot_strategy=pivoting_strategy.BlandsRule()
@@ -549,13 +553,13 @@ class TestDualSolve:
 
 class TestDualPhaseOne:
     def test_artificial_problem_setup(
-        self, example_problem_35: lp_problem.LpProblem
+        self, example_problem_35: lp_problem.StandardFormLP
     ) -> None:
         # Create a problem that is not dual-feasible with the QR-chosen basis [0, 1, 2].
         # By negating the objective, we get negative reduced costs for the slack variables.
         # The problem failed previously since the basis obtained in _setup_artificial_problem
         # was already dual feasible so nothing happened.
-        non_dual_feasible_problem = lp_problem.LpProblem(
+        non_dual_feasible_problem = lp_problem.StandardFormLP(
             constraint_matrix=example_problem_35.constraint_matrix,
             rhs=example_problem_35.rhs,
             objective=-example_problem_35.objective,
@@ -577,7 +581,7 @@ class TestDualPhaseOne:
         assert np.all(s_non_basic >= -1e-6)
 
     def test_dual_solve_without_initial_basis(
-        self, example_problem_35: lp_problem.LpProblem
+        self, example_problem_35: lp_problem.StandardFormLP
     ) -> None:
         solver = dual_simplex.DualSimplex()
         result = solver.solve(example_problem_35)
@@ -591,7 +595,7 @@ class TestDualPhaseOne:
         b = np.array([10.0], dtype=float)
         c = np.array([-1.0, -1.0, 0.0], dtype=float)
 
-        problem = lp_problem.LpProblem(a, b, c)
+        problem = lp_problem.StandardFormLP(a, b, c)
         solver = dual_simplex.DualSimplex()
 
         with pytest.raises(UnboundedLpError):

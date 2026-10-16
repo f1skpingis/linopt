@@ -1,175 +1,210 @@
+"""LP formulations with explicit, solver-independent mathematical contracts."""
+
 from dataclasses import dataclass
 from functools import cached_property
 
-import jaxtyping
 import numpy as np
 from scipy import sparse
 
 from common.numpy_type_aliases import ArrayF
 
 
-@dataclass(frozen=True)
-class PrimalFeasibilityStatus:
-    lower_bounds: float
-    upper_bounds: float
-    equalities: float
-    inequalities: float
-    tolerance: float
+def _validate_matrix_objective(a: ArrayF, c: ArrayF) -> None:
+    if a.ndim != 2 or c.shape != (a.shape[1],):
+        raise ValueError("Expected matrix (m, n) and objective (n,).")
+    if not np.all(np.isfinite(a)) or not np.all(np.isfinite(c)):
+        raise ValueError("Matrix and objective must be finite.")
 
-    def feasible(self) -> bool:
-        return all(
-            violation <= self.tolerance
-            for violation in (
-                self.lower_bounds,
-                self.upper_bounds,
-                self.equalities,
-                self.inequalities,
-            )
+
+def _validate_bounds(lower: ArrayF, upper: ArrayF, size: int) -> None:
+    if lower.shape != (size,) or upper.shape != (size,):
+        raise ValueError(f"Expected bound vectors of shape ({size},).")
+    if (
+        np.any(np.isnan(lower))
+        or np.any(np.isnan(upper))
+        or np.any(np.isposinf(lower))
+        or np.any(np.isneginf(upper))
+        or np.any(lower > upper)
+    ):
+        raise ValueError(
+            "Bounds must satisfy -inf <= lower <= upper <= inf, with no +inf lower or -inf upper."
         )
 
 
 @dataclass(frozen=True)
-class DualFeasibilityStatus:
-    inequality_multipliers: float
-    lower_bound_reduced_costs: float
-    upper_bound_reduced_costs: float
-    free_variable_reduced_costs: float
-    stationarity: float
-    tolerance: float
+class StandardFormLP:
+    """Minimize c.T x subject to A x = b and x >= 0.
 
-    def feasible(self) -> bool:
-        return all(
-            violation <= self.tolerance
-            for violation in (
-                self.inequality_multipliers,
-                self.lower_bound_reduced_costs,
-                self.upper_bound_reduced_costs,
-                self.free_variable_reduced_costs,
-                self.stationarity,
-            )
-        )
+    Used by the current simplex and interior-point implementations.
+    """
 
+    constraint_matrix: ArrayF
+    rhs: ArrayF
+    objective: ArrayF
 
-@dataclass(frozen=True)
-class LpProblem:
-    constraint_matrix: jaxtyping.Float[ArrayF, "m n"]
-    rhs: jaxtyping.Float[ArrayF, " m"]
-    objective: jaxtyping.Float[ArrayF, " n"]
-
-    inequality_constraint_matrix: jaxtyping.Float[ArrayF, "q n"] | None = None
-    inequality_rhs: jaxtyping.Float[ArrayF, " q"] | None = None
-
-    lower_bounds: jaxtyping.Float[ArrayF, " n"] | None = None
-    upper_bounds: jaxtyping.Float[ArrayF, " n"] | None = None
+    def __post_init__(self) -> None:
+        _validate_matrix_objective(self.constraint_matrix, self.objective)
+        if self.rhs.shape != (self.constraint_matrix.shape[0],) or not np.all(
+            np.isfinite(self.rhs)
+        ):
+            raise ValueError("Expected a finite RHS vector of shape (m,).")
 
     @property
     def num_variables(self) -> int:
-        return len(self.objective)
+        return self.objective.size
 
     @cached_property
     def sparse_constraint_matrix(self) -> sparse.csr_array:
         return sparse.csr_array(self.constraint_matrix)
 
-    @cached_property
-    def effective_inequality_constraint_matrix(self) -> ArrayF:
-        if self.inequality_constraint_matrix is None:
-            return np.empty((0, self.num_variables))
-        return self.inequality_constraint_matrix
+    def to_bounded_form(self) -> "BoundedFormLP":
+        """Embed standard form without changing coordinates or adding rows."""
+        return BoundedFormLP(
+            self.constraint_matrix,
+            self.objective,
+            self.rhs,
+            self.rhs,
+            np.zeros(self.num_variables),
+            np.full(self.num_variables, np.inf),
+        )
 
-    @cached_property
-    def effective_inequality_rhs(self) -> ArrayF:
-        if self.inequality_rhs is None:
-            return np.empty(0)
-        return self.inequality_rhs
 
-    @cached_property
-    def effective_lower_bounds(self) -> ArrayF:
-        if self.lower_bounds is None:
-            return np.full(self.num_variables, -np.inf)
-        return self.lower_bounds
+@dataclass(frozen=True)
+class PrimalFeasibilityStatus:
+    variable_bounds: float
+    row_bounds: float
+    tolerance: float
 
-    @cached_property
-    def effective_upper_bounds(self) -> ArrayF:
-        if self.upper_bounds is None:
-            return np.full(self.num_variables, np.inf)
-        return self.upper_bounds
+    def feasible(self) -> bool:
+        return max(self.variable_bounds, self.row_bounds) <= self.tolerance
 
-    @cached_property
-    def num_inequality_constraints(self) -> int:
-        return self.effective_inequality_rhs.size
+
+def dual_domain_projection(lower: ArrayF, upper: ArrayF, values: ArrayF) -> ArrayF:
+    """Project onto Y or R in Section 2, Eq. (1) of the newer PDLP paper.
+
+    Free bounds require zero; lower-only requires nonnegative; upper-only
+    requires nonpositive; two finite bounds allow either sign.
+    """
+    free = np.isneginf(lower) & np.isposinf(upper)
+    lower_only = np.isfinite(lower) & np.isposinf(upper)
+    upper_only = np.isneginf(lower) & np.isfinite(upper)
+    result = values.copy()
+    result[free] = 0.0
+    result[lower_only] = np.maximum(0.0, result[lower_only])
+    result[upper_only] = np.minimum(0.0, result[upper_only])
+    return result
+
+
+@dataclass(frozen=True)
+class DualFeasibilityStatus:
+    row_multipliers: float
+    reduced_costs: float
+    stationarity: float
+    tolerance: float
+
+    def feasible(self) -> bool:
+        return (
+            max(self.row_multipliers, self.reduced_costs, self.stationarity)
+            <= self.tolerance
+        )
+
+
+@dataclass(frozen=True)
+class BoundedFormLP:
+    """Minimize c.T x with row_lower <= A x <= row_upper,
+    variable_lower <= x <= variable_upper (new PDLP paper, Section 2, Eq. 1).
+
+    Equal row bounds encode equalities. Infinite bounds encode absent bounds.
+    Explicit bounds avoid any implicit nonnegativity convention.
+    """
+
+    constraint_matrix: ArrayF
+    objective: ArrayF
+    row_lower: ArrayF
+    row_upper: ArrayF
+    variable_lower: ArrayF
+    variable_upper: ArrayF
+
+    def __post_init__(self) -> None:
+        _validate_matrix_objective(self.constraint_matrix, self.objective)
+        m, n = self.constraint_matrix.shape
+        _validate_bounds(self.row_lower, self.row_upper, m)
+        _validate_bounds(self.variable_lower, self.variable_upper, n)
+
+    @property
+    def num_variables(self) -> int:
+        return self.objective.size
 
     def primal_feasibility_status(
         self, x: ArrayF, tolerance: float
     ) -> PrimalFeasibilityStatus:
+        if x.shape != (self.num_variables,):
+            raise ValueError("Expected x of shape (n,).")
+        if not np.all(np.isfinite(x)):
+            return PrimalFeasibilityStatus(np.inf, np.inf, tolerance)
+        ax = self.constraint_matrix @ x
         return PrimalFeasibilityStatus(
-            lower_bounds=float(
-                np.max(np.maximum(self.effective_lower_bounds - x, 0.0), initial=0.0)
-            ),
-            upper_bounds=float(
-                np.max(np.maximum(x - self.effective_upper_bounds, 0.0), initial=0.0)
-            ),
-            equalities=float(
-                np.max(np.abs(self.constraint_matrix @ x - self.rhs), initial=0.0)
-            ),
-            inequalities=float(
+            float(
                 np.max(
-                    np.maximum(
-                        self.effective_inequality_rhs
-                        - self.effective_inequality_constraint_matrix @ x,
-                        0.0,
-                    ),
+                    np.maximum(self.variable_lower - x, x - self.variable_upper),
                     initial=0.0,
                 )
             ),
-            tolerance=tolerance,
+            float(
+                np.max(
+                    np.maximum(self.row_lower - ax, ax - self.row_upper), initial=0.0
+                )
+            ),
+            tolerance,
         )
 
     def dual_feasibility_status(
         self,
-        equality_multipliers: ArrayF,
-        inequality_multipliers: ArrayF,
+        row_multipliers: ArrayF,
         tolerance: float,
         reduced_costs: ArrayF | None = None,
     ) -> DualFeasibilityStatus:
-        """Check c - A.T @ y_eq - G.T @ y_ineq = r with y_ineq >= 0.
+        """Check y in Y, r in R and c - A.T y = r (Eq. 1).
 
-        Reduced costs r must be nonnegative for lower-only bounds, nonpositive
-        for upper-only bounds, and zero for free variables. When omitted, r is
-        chosen as the projection of c - A.T @ y_eq - G.T @ y_ineq onto these
-        sets. Equality multipliers are unrestricted.
+        If omitted, recover r by projection onto R. This checks dual feasibility,
+        not complementarity or optimality with a particular primal point.
         """
-        raw_reduced_costs = (
-            self.objective
-            - self.constraint_matrix.T @ equality_multipliers
-            - self.effective_inequality_constraint_matrix.T @ inequality_multipliers
-        )
-        finite_lower = np.isfinite(self.effective_lower_bounds)
-        finite_upper = np.isfinite(self.effective_upper_bounds)
-        lower_only = finite_lower & ~finite_upper
-        upper_only = ~finite_lower & finite_upper
-        free = ~finite_lower & ~finite_upper
-
+        if row_multipliers.shape != self.row_lower.shape:
+            raise ValueError("Expected row multipliers of shape (m,).")
+        if reduced_costs is not None and reduced_costs.shape != self.objective.shape:
+            raise ValueError("Expected reduced costs of shape (n,).")
+        if not np.all(np.isfinite(row_multipliers)) or (
+            reduced_costs is not None and not np.all(np.isfinite(reduced_costs))
+        ):
+            return DualFeasibilityStatus(np.inf, np.inf, np.inf, tolerance)
+        raw = self.objective - self.constraint_matrix.T @ row_multipliers
         if reduced_costs is None:
-            reduced_costs = raw_reduced_costs.copy()
-            reduced_costs[lower_only] = np.maximum(reduced_costs[lower_only], 0.0)
-            reduced_costs[upper_only] = np.minimum(reduced_costs[upper_only], 0.0)
-            reduced_costs[free] = 0.0
-
+            reduced_costs = dual_domain_projection(
+                self.variable_lower, self.variable_upper, raw
+            )
         return DualFeasibilityStatus(
-            inequality_multipliers=float(
-                np.max(np.maximum(-inequality_multipliers, 0.0), initial=0.0)
+            float(
+                np.max(
+                    np.abs(
+                        row_multipliers
+                        - dual_domain_projection(
+                            self.row_lower, self.row_upper, row_multipliers
+                        )
+                    ),
+                    initial=0.0,
+                )
             ),
-            lower_bound_reduced_costs=float(
-                np.max(np.maximum(-reduced_costs[lower_only], 0.0), initial=0.0)
+            float(
+                np.max(
+                    np.abs(
+                        reduced_costs
+                        - dual_domain_projection(
+                            self.variable_lower, self.variable_upper, reduced_costs
+                        )
+                    ),
+                    initial=0.0,
+                )
             ),
-            upper_bound_reduced_costs=float(
-                np.max(np.maximum(reduced_costs[upper_only], 0.0), initial=0.0)
-            ),
-            free_variable_reduced_costs=float(
-                np.max(np.abs(reduced_costs[free]), initial=0.0)
-            ),
-            stationarity=float(
-                np.max(np.abs(raw_reduced_costs - reduced_costs), initial=0.0)
-            ),
-            tolerance=tolerance,
+            float(np.max(np.abs(raw - reduced_costs), initial=0.0)),
+            tolerance,
         )

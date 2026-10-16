@@ -3,7 +3,7 @@ from typing import override
 
 import jaxtyping
 import numpy as np
-from common.lp_problem import LpProblem
+from common.lp_problem import StandardFormLP
 from common.numpy_type_aliases import ArrayF, ArrayI
 
 from simplex import linear_algebra
@@ -18,7 +18,7 @@ PIVOTING_TOLERANCE = 1e-5
 class PrimalPivotingStrategy(ABC):
     def initialize(
         self,
-        problem: LpProblem,
+        problem: StandardFormLP,
         basis: jaxtyping.Int[ArrayI, " m"],
         basis_factorization: linear_algebra.ProductFormFactorization,
     ) -> None:
@@ -85,7 +85,7 @@ class PrimalPivotingStrategy(ABC):
 class DualPivotingStrategy(ABC):
     def initialize(
         self,
-        problem: LpProblem,
+        problem: StandardFormLP,
         basis: jaxtyping.Int[ArrayI, " m"],
         basis_factorization: linear_algebra.ProductFormFactorization,
     ) -> None:
@@ -205,10 +205,10 @@ class SteepestEdgeRule(PrimalPivotingStrategy):
 
     def __init__(
         self,
-        problem: LpProblem | None = None,
+        problem: StandardFormLP | None = None,
         initial_basis: jaxtyping.Int[ArrayI, " m"] | None = None,
     ) -> None:
-        self.problem: LpProblem | None = None
+        self.problem: StandardFormLP | None = None
         self.entering_index = -1
         self.non_basic_vars = np.array([], dtype=int)
         self.norm_eta_squared = np.array([], dtype=float)
@@ -225,7 +225,7 @@ class SteepestEdgeRule(PrimalPivotingStrategy):
     @override
     def initialize(
         self,
-        problem: LpProblem,
+        problem: StandardFormLP,
         basis: jaxtyping.Int[ArrayI, " m"],
         basis_factorization: linear_algebra.ProductFormFactorization,
     ) -> None:

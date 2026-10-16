@@ -50,9 +50,9 @@ class DualSimplex:
         return self.solve_history_
 
     def _setup_artificial_problem(
-        self, problem: lp_problem.LpProblem, big_m: float = 1e6
+        self, problem: lp_problem.StandardFormLP, big_m: float = 1e6
     ) -> tuple[
-        lp_problem.LpProblem,
+        lp_problem.StandardFormLP,
         jaxtyping.Int[ArrayI, " m"],
     ]:
         """
@@ -115,7 +115,7 @@ class DualSimplex:
         new_b = np.append(problem.rhs, big_m)
         new_c = np.append(problem.objective, 0.0)
 
-        augmented_problem = lp_problem.LpProblem(
+        augmented_problem = lp_problem.StandardFormLP(
             constraint_matrix=new_a, rhs=new_b, objective=new_c
         )
 
@@ -125,7 +125,7 @@ class DualSimplex:
 
     def _finalize_result(
         self,
-        problem: lp_problem.LpProblem,
+        problem: lp_problem.StandardFormLP,
         basis: jaxtyping.Int[ArrayI, " m"],
         x_basis: jaxtyping.Float[ArrayF, " m"],
         is_augmented: bool = False,
@@ -155,10 +155,12 @@ class DualSimplex:
 
     def solve(
         self,
-        problem: lp_problem.LpProblem,
+        problem: lp_problem.StandardFormLP,
         max_iterations: int = 100,
         initial_basis: jaxtyping.Int[ArrayI, " m"] | None = None,
     ) -> simplex_util.SolveResult:
+        if not isinstance(problem, lp_problem.StandardFormLP):
+            raise TypeError("This solver requires StandardFormLP (Ax = b, x >= 0).")
 
         original_num_variables = problem.num_variables
         is_augmented = False

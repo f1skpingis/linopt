@@ -90,15 +90,15 @@ PROBLEMS_TO_TEST = [
 
 
 @pytest.fixture(scope="module")
-def cached_lp_problems() -> dict[str, lp_problem.LpProblem]:
+def cached_lp_problems() -> dict[str, lp_problem.StandardFormLP]:
     """Cache for downloaded and converted LP problems to avoid multiple downloads."""
     return {}
 
 
 def get_problem(
     name: str,
-    cache: dict[str, lp_problem.LpProblem],
-) -> lp_problem.LpProblem:
+    cache: dict[str, lp_problem.StandardFormLP],
+) -> lp_problem.StandardFormLP:
     if name not in cache:
         res = load_netlib_problems.download_and_parse_mps(name)
         assert res is not None, f"Failed to download/parse {name}"
@@ -109,11 +109,10 @@ def get_problem(
             a, b, c, row_types
         )
 
-        cache[name] = lp_problem.LpProblem(
+        cache[name] = lp_problem.StandardFormLP(
             constraint_matrix=a_std,
             rhs=b_std,
             objective=c_std,
-            lower_bounds=np.zeros_like(c_std),
         )
 
     return cache[name]
@@ -121,7 +120,7 @@ def get_problem(
 
 @pytest.mark.parametrize("name", PROBLEMS_TO_TEST)
 def test_netlib_ipm(
-    name: str, cached_lp_problems: dict[str, lp_problem.LpProblem]
+    name: str, cached_lp_problems: dict[str, lp_problem.StandardFormLP]
 ) -> None:
     """Test the IPM solver on a Netlib problem."""
     lp = get_problem(name, cached_lp_problems)
@@ -136,7 +135,7 @@ def test_netlib_ipm(
 
 @pytest.mark.parametrize("name", PROBLEMS_TO_TEST)
 def test_netlib_primal_simplex(
-    name: str, cached_lp_problems: dict[str, lp_problem.LpProblem]
+    name: str, cached_lp_problems: dict[str, lp_problem.StandardFormLP]
 ) -> None:
     """Test the Primal Simplex solver on a Netlib problem."""
     lp = get_problem(name, cached_lp_problems)
@@ -154,7 +153,7 @@ def test_netlib_primal_simplex(
 
 @pytest.mark.parametrize("name", PROBLEMS_TO_TEST)
 def test_netlib_dual_simplex(
-    name: str, cached_lp_problems: dict[str, lp_problem.LpProblem]
+    name: str, cached_lp_problems: dict[str, lp_problem.StandardFormLP]
 ) -> None:
     """Test the Dual Simplex solver on a Netlib problem."""
     lp = get_problem(name, cached_lp_problems)
@@ -176,7 +175,7 @@ def test_netlib_dual_simplex(
 # tol=1e-8   23,800 iterations   0.27 s
 @pytest.mark.parametrize("name", PROBLEMS_TO_TEST)
 def test_netlib_pdhg(
-    name: str, cached_lp_problems: dict[str, lp_problem.LpProblem]
+    name: str, cached_lp_problems: dict[str, lp_problem.StandardFormLP]
 ) -> None:
     """Test the Dual Simplex solver on a Netlib problem."""
     lp = get_problem(name, cached_lp_problems)
@@ -187,7 +186,9 @@ def test_netlib_pdhg(
     y_size, x_size = lp.constraint_matrix.shape
     x = np.zeros(x_size)
     y = np.zeros(y_size)
-    solution = pdhg_solver.solve(lp, (x, y), max_iterations=iters * 1000)
+    solution = pdhg_solver.solve(
+        lp.to_bounded_form(), (x, y), max_iterations=iters * 1000
+    )
 
     obtained_optimum = float(lp.objective.T @ solution[0])
     assert np.isclose(obtained_optimum, optimum)
@@ -196,7 +197,7 @@ def test_netlib_pdhg(
 # For comparison with SciPy.
 @pytest.mark.parametrize("name", PROBLEMS_TO_TEST)
 def test_netlib_scipy(
-    name: str, cached_lp_problems: dict[str, lp_problem.LpProblem]
+    name: str, cached_lp_problems: dict[str, lp_problem.StandardFormLP]
 ) -> None:
     """Test the Dual Simplex solver on a Netlib problem."""
     lp = get_problem(name, cached_lp_problems)

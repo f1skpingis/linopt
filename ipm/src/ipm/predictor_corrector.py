@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 def calculate_starting_point(
-    problem: lp_problem.LpProblem,
+    problem: lp_problem.StandardFormLP,
 ) -> ipm_tools.PrimalDualTuple:
     """Calculates a suitable starting point for the predictor corrector algorithm
     according to the recipe on p. 410 in Nocedal & Wright"""
@@ -56,9 +56,11 @@ class PredictorCorrector:
         self.max_iterations = max_iterations
         self.optimality_tolerance = optimality_tolerance
 
-    def solve(self, problem: lp_problem.LpProblem) -> ipm_tools.PrimalDualTuple:
+    def solve(self, problem: lp_problem.StandardFormLP) -> ipm_tools.PrimalDualTuple:
         """Solves the LP `problem` using algorithm 14.3 on p. 411 in Nocedal & Wright."""
 
+        if not isinstance(problem, lp_problem.StandardFormLP):
+            raise TypeError("This solver requires StandardFormLP (Ax = b, x >= 0).")
         point = calculate_starting_point(problem)
 
         logger.info("                Objective              Residual")

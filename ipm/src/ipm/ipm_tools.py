@@ -106,7 +106,7 @@ def calculate_centering_parameter(
 
 
 def solve_newton_direction(
-    lp_problem: lp_problem.LpProblem,
+    lp_problem: lp_problem.StandardFormLP,
     point: PrimalDualTuple,
 ) -> PrimalDualTuple:
     """Solves the system (14.35) in Nocedal & Wright for the Newton direction"""
@@ -140,7 +140,7 @@ def calculate_affine_scaling_step(
 
 
 def solve_predictor_corrector_direction(
-    lp_problem: lp_problem.LpProblem,
+    lp_problem: lp_problem.StandardFormLP,
     point: PrimalDualTuple,
 ) -> PrimalDualTuple:
     """Solves the system (14.35) in Nocedal & Wright for the predictor corrector direction"""

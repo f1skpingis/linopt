@@ -26,7 +26,7 @@ LOG_INTERVAL = 100
 
 
 def is_linearly_independent(
-    problem: lp_problem.LpProblem,
+    problem: lp_problem.StandardFormLP,
     basis_factorization: linear_algebra.ProductFormFactorization,
     entering_var: int,
     exiting_index: int,
@@ -40,7 +40,7 @@ def is_linearly_independent(
 
 
 def purge_aux_vars(
-    problem: lp_problem.LpProblem,
+    problem: lp_problem.StandardFormLP,
     basis: jaxtyping.Int[ArrayI, " m"],
     num_variables: int,
 ) -> jaxtyping.Int[ArrayI, " m"]:
@@ -94,13 +94,13 @@ class PrimalSimplex:
         return self.solve_history_
 
     def find_initial_basis(
-        self, problem: lp_problem.LpProblem, max_iterations: int = 100
+        self, problem: lp_problem.StandardFormLP, max_iterations: int = 100
     ) -> jaxtyping.Int[ArrayI, " {problem.constraint_matrix.shape[0]}"]:
         """
         Finds a basic feasible solution by solving an auxiliary LP. Throws a SolveFailedError if it fails.
 
         Need to use the symbolic expression " {problem.constraint_matrix.shape[0]}" instead of " m" in the
-        jaxtyping annotation. The constraint_matrix field in the LpProblem dataclass is annotated with "m n",
+        jaxtyping annotation. The matrix has shape (m, n),
         but the runtime type checker can't see the annotations inside the dataclass, see
         https://github.com/patrick-kidger/jaxtyping/issues/342.
         """
@@ -108,7 +108,7 @@ class PrimalSimplex:
         logger.info("Solving auxiliary phase one LP to find a starting basis...")
 
         e_matrix = np.diag(np.array([1.0 if b >= 0 else -1.0 for b in problem.rhs]))
-        phase_one_problem = lp_problem.LpProblem(
+        phase_one_problem = lp_problem.StandardFormLP(
             constraint_matrix=np.concatenate(
                 [problem.constraint_matrix, e_matrix], axis=1
             ),
@@ -149,7 +149,7 @@ class PrimalSimplex:
 
     def _compute_reduced_costs(
         self,
-        problem: lp_problem.LpProblem,
+        problem: lp_problem.StandardFormLP,
         basis: jaxtyping.Int[ArrayI, " m"],
         non_basic_vars: jaxtyping.Int[ArrayI, " num_nonbasic"],
         basis_factorization: linear_algebra.ProductFormFactorization,
@@ -166,7 +166,7 @@ class PrimalSimplex:
 
     def _finalize_result(
         self,
-        problem: lp_problem.LpProblem,
+        problem: lp_problem.StandardFormLP,
         basis: jaxtyping.Int[ArrayI, " m"],
         x_basis: jaxtyping.Float[ArrayF, " m"],
     ) -> SolveResult:
@@ -181,10 +181,12 @@ class PrimalSimplex:
 
     def solve(
         self,
-        problem: lp_problem.LpProblem,
+        problem: lp_problem.StandardFormLP,
         max_iterations: int = 100,
         initial_basis: jaxtyping.Int[ArrayI, " m"] | None = None,
     ) -> SolveResult:
+        if not isinstance(problem, lp_problem.StandardFormLP):
+            raise TypeError("This solver requires StandardFormLP (Ax = b, x >= 0).")
         self.solve_history_ = SolveHistory()
 
         if initial_basis is not None:

@@ -109,7 +109,7 @@ class TestPredictorCorrectorSolve:
             0.0,
         ]
     )  # 0, 0, 1, 1, is the optimal solution.
-    lp = lp_problem.LpProblem(constraint_matrix=a, rhs=b, objective=c)
+    lp = lp_problem.StandardFormLP(constraint_matrix=a, rhs=b, objective=c)
 
     def test_solve_for_newton_direction(self) -> None:
         """Test computation of the newton direction, see (14.8) in the book."""
@@ -250,7 +250,7 @@ class TestLpSolving:
         )
         b = np.array([0.0, 0.0, 1.0], dtype=float).T
         c = np.array([-10.0, 57.0, 9.0, 24.0, 0.0, 0.0, 0.0], dtype=float)
-        lp = lp_problem.LpProblem(constraint_matrix=a, rhs=b, objective=c)
+        lp = lp_problem.StandardFormLP(constraint_matrix=a, rhs=b, objective=c)
 
         # Test solving the lp
         solver = predictor_corrector.PredictorCorrector(100, 1e-10)
