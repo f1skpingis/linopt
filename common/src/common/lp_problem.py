@@ -8,6 +8,7 @@ import numpy as np
 from scipy import sparse
 
 from common.numpy_type_aliases import ArrayF
+from common.diagonal_scaling import DiagonalScaling
 
 
 def _validate_matrix_objective(a: ArrayF, c: ArrayF) -> None:
@@ -126,14 +127,19 @@ class BoundedFormLP:
     variable_lower: ArrayF
     variable_upper: ArrayF
 
-    # Holds D1 and D2 if it has been predonditioned
-    diagonal_preconditioning: tuple[ArrayF, ArrayF] | None = None
+    # Accumulated coordinate map, if this problem has been preconditioned.
+    diagonal_preconditioning: DiagonalScaling | None = None
 
     def __post_init__(self) -> None:
         _validate_matrix_objective(self.constraint_matrix, self.objective)
         m, n = self.constraint_matrix.shape
         _validate_bounds(self.row_lower, self.row_upper, m)
         _validate_bounds(self.variable_lower, self.variable_upper, n)
+        if self.diagonal_preconditioning is not None and (
+            self.diagonal_preconditioning.row_factors.shape != (m,)
+            or self.diagonal_preconditioning.column_factors.shape != (n,)
+        ):
+            raise ValueError("Scaling dimensions must match the constraint matrix.")
 
     @property
     def num_variables(self) -> int:
@@ -166,16 +172,6 @@ class BoundedFormLP:
             ),
             tolerance,
         )
-
-    def to_unpreconditioned_primal_variables(self, x: ArrayF) -> ArrayF:
-        if self.diagonal_preconditioning is None:
-            return x
-        return self.diagonal_preconditioning[1] * x
-
-    def to_unpreconditioned_dual_variables(self, y: ArrayF) -> ArrayF:
-        if self.diagonal_preconditioning is None:
-            return y
-        return self.diagonal_preconditioning[0] * y
 
     def dual_feasibility_status(
         self,

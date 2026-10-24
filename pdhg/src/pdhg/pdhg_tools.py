@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from enum import StrEnum
+import logging
 
 import numpy as np
 from common import lp_problem
@@ -14,6 +15,9 @@ OPTIMALITY_CHECK_INTERVAL = 20
 CRUDE_OPTIMALITY_TOLERANCE = 1e-4
 MODERATE_OPTIMALITY_TOLERANCE = 1e-6
 ACCURATE_OPTIMALITY_TOLERANCE = 1e-8
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -181,6 +185,14 @@ def finite_row_bounds_norm(problem: lp_problem.BoundedFormLP) -> float:
     return float(np.linalg.norm(np.maximum(lower, upper)))
 
 
+def initialize_primal_weight(
+    objective_norm: float, combine_bounds_norm: float
+) -> float:
+    if objective_norm > 0.0 and combine_bounds_norm > 0.0:
+        return objective_norm / combine_bounds_norm
+    return 1.0
+
+
 def compute_optimality_metrics(
     problem: lp_problem.BoundedFormLP, x: ArrayF, y: ArrayF
 ) -> PdhgOptimalityMetrics:
@@ -201,3 +213,88 @@ def compute_optimality_metrics(
         float(np.linalg.norm(np.concatenate((raw_reduced_costs - r, y - projected_y)))),
         compute_relative_duality_gap(primal, dual),
     )
+
+
+def omega_norm(x: ArrayF, y: ArrayF, primal_weight: float) -> float:
+    return np.sqrt(
+        primal_weight * (np.linalg.norm(x, 2) ** 2)
+        + (np.linalg.norm(y, 2) ** 2) / primal_weight
+    )
+
+
+def adaptive_pdhg_step(
+    problem: lp_problem.BoundedFormLP,
+    step_size_parameters: PdhgStepSizeParameters,
+    x: ArrayF,
+    y: ArrayF,
+    iteration: int,
+    logging: bool = False,
+) -> tuple[tuple[ArrayF, ArrayF], PdhgStepSizeParameters, PdhgStepSizeParameters]:
+    """Adaptive rule to control the PDLP step size
+
+    The rule heuristically attempts to stay close to a condition from the convergence
+    analysis of PDHG with which convergence can be proven.
+
+    The condition is equation (5) of 2501.07018v2
+      `eta <= ||z^{k+1} - z^k||^2_omega / (2 * (y^{k+1} - y^k)^T A (x^{k+1) - x^k))`
+
+    If the step calculated with the current step size violates that condition,
+    then a smaller step size is tried until the condition is satisfied.
+
+    """
+    max_iterations = 100
+
+    if logging:
+        logger.info("Iteration    eta    eta_prime    done")
+
+    adaptive_algo_it = 0
+    while adaptive_algo_it < max_iterations:
+        x_prime = primal_update(
+            problem, problem.lin_op_a, x, y, step_size_parameters.primal_step_size
+        )
+        y_prime = dual_update(
+            problem,
+            problem.lin_op_a,
+            2 * x_prime - x,
+            y,
+            step_size_parameters.dual_step_size,
+        )
+
+        y_diff = y_prime - y
+        x_diff = x_prime - x
+
+        a_inner_product_between_diffs = -y_diff.T @ problem.lin_op_a.matvec(x_diff)
+        if a_inner_product_between_diffs > 0:
+            step_size_bar = omega_norm(
+                x_diff, y_diff, step_size_parameters.primal_weight
+            ) ** 2 / (2 * a_inner_product_between_diffs)
+        else:
+            step_size_bar = np.inf
+
+        # TODO(martins): Give better names to these constaints and also
+        # more intitive names to step_size_prime etc. Write a nice docstring.
+        step_size_prime = min(
+            (1 - ((iteration + 1) ** (-0.3))) * step_size_bar,
+            (1 + ((iteration + 1) ** (-0.6))) * step_size_parameters.step_size,
+        )
+
+        if logging:
+            logger.info(
+                f"{adaptive_algo_it:<8}     {step_size_parameters.step_size:<6.3} {step_size_prime:<6.3}       {bool(step_size_parameters.step_size <= step_size_bar)}"
+            )
+
+        if step_size_parameters.step_size <= step_size_bar:
+            return (
+                (x_prime, y_prime),
+                step_size_parameters,
+                PdhgStepSizeParameters(
+                    primal_weight=step_size_parameters.primal_weight,
+                    step_size=step_size_prime,
+                ),
+            )
+        step_size_parameters = PdhgStepSizeParameters(
+            primal_weight=step_size_parameters.primal_weight, step_size=step_size_prime
+        )
+        max_iterations -= 1
+
+    raise RuntimeError("Adaptive step hit max iteration limit.")

@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import numpy as np
 from common import lp_problem
-from common.linear_algebra import DenseLinearOperator
+from common.diagonal_scaling import DiagonalScaling, PreconditionTransformation
 from common.numpy_type_aliases import ArrayF
 from common.preconditioning import pdlp_preconditioning
 
@@ -68,41 +68,37 @@ class PdlpSolver:
         # Track only scaling introduced by this solve. The input can already
         # carry a map to an earlier problem, but starts, results, and stopping
         # criteria must all use the coordinates of the supplied problem.
+        preconditioned_problem = replace(problem, diagonal_preconditioning=None)
         if self.apply_preconditioning:
-            preconditioned_problem = pdlp_preconditioning(
-                replace(problem, diagonal_preconditioning=None)
+            preconditioned_problem = pdlp_preconditioning(preconditioned_problem)
+
+        scaling = preconditioned_problem.diagonal_preconditioning
+        if scaling is None:
+            scaling = DiagonalScaling(
+                np.ones(problem.constraint_matrix.shape[0]),
+                np.ones(problem.num_variables),
             )
-        else:
-            preconditioned_problem = problem
 
-        row_scale: ArrayF = np.ones(problem.constraint_matrix.shape[0])
-        column_scale: ArrayF = np.ones(problem.num_variables)
-        if (
-            self.apply_preconditioning
-            and preconditioned_problem.diagonal_preconditioning is not None
-        ):
-            row_scale, column_scale = preconditioned_problem.diagonal_preconditioning
-        x = x / column_scale
-        y = y / row_scale
+        x = scaling.transform_primal(x, direction=PreconditionTransformation.TO)
+        y = scaling.transform_dual(y, direction=PreconditionTransformation.TO)
 
-        a = DenseLinearOperator(preconditioned_problem.constraint_matrix)
-        primal_weight = 1e0
-        power_iteration_result = pdhg_tools.iterative_spectral_norm(
-            a, max_iter=1000, tol=1e-4
+        bounds_norm = pdhg_tools.finite_row_bounds_norm(problem)
+        c_norm = float(np.linalg.norm(problem.objective))
+
+        primal_weight = pdhg_tools.initialize_primal_weight(
+            float(np.linalg.norm(preconditioned_problem.objective)),
+            pdhg_tools.finite_row_bounds_norm(preconditioned_problem),
         )
-        if power_iteration_result.status != pdhg_tools.PowerIterationStatus.CONVERGED:
-            raise RuntimeError("Could not compute the spectral norm of A")
+
         step_size = (
-            0.9 / power_iteration_result.spectral_norm
-            if power_iteration_result.spectral_norm > 0
+            1.0 / np.max(np.abs(preconditioned_problem.constraint_matrix))
+            if preconditioned_problem.constraint_matrix.size != 0
             else 1.0
         )
         step_size_parameters = pdhg_tools.PdhgStepSizeParameters(
             primal_weight=primal_weight, step_size=step_size
         )
-
-        bounds_norm = pdhg_tools.finite_row_bounds_norm(problem)
-        c_norm = float(np.linalg.norm(problem.objective))
+        step_size_hat = step_size_parameters
 
         # TODO(martin): Centralize this type of logging format. It is the same for Simplex
         logger.info("Starting PDHG algorithm...")
@@ -114,36 +110,52 @@ class PdlpSolver:
         start = time.time()
         for iteration in range(max_iterations):
             metrics: pdhg_tools.PdhgOptimalityMetrics | None = None
-            old_x = x.copy()
 
-            x = pdhg_tools.primal_update(
-                preconditioned_problem, a, x, y, step_size_parameters.primal_step_size
-            )
-            y = pdhg_tools.dual_update(
+            (x, y), _, step_size_hat = pdhg_tools.adaptive_pdhg_step(
+                # The paper says having iteration start at 0, but that would lead to weird step sizes on the first iteration
                 preconditioned_problem,
-                a,
-                2 * x - old_x,
+                step_size_hat,
+                x,
                 y,
-                step_size_parameters.dual_step_size,
+                iteration + 1,
             )
 
             if iteration % pdhg_tools.OPTIMALITY_CHECK_INTERVAL == 0:
                 metrics = pdhg_tools.compute_optimality_metrics(
-                    problem, column_scale * x, row_scale * y
+                    problem,
+                    scaling.transform_primal(
+                        x, direction=PreconditionTransformation.FROM
+                    ),
+                    scaling.transform_dual(
+                        y, direction=PreconditionTransformation.FROM
+                    ),
                 )
                 if metrics.is_optimal(
                     c_norm=c_norm,
                     bounds_norm=bounds_norm,
                     tolerance=pdhg_tools.ACCURATE_OPTIMALITY_TOLERANCE,
                 ):
-                    return (column_scale * x, row_scale * y)
+                    return (
+                        scaling.transform_primal(
+                            x, direction=PreconditionTransformation.FROM
+                        ),
+                        scaling.transform_dual(
+                            y, direction=PreconditionTransformation.FROM
+                        ),
+                    )
 
             if (iteration < pdhg_tools.LOG_FIRST_ITERATIONS) or (
                 iteration % pdhg_tools.LOG_INTERVAL == 0
             ):
                 if metrics is None:
                     metrics = pdhg_tools.compute_optimality_metrics(
-                        problem, column_scale * x, row_scale * y
+                        problem,
+                        scaling.transform_primal(
+                            x, direction=PreconditionTransformation.FROM
+                        ),
+                        scaling.transform_dual(
+                            y, direction=PreconditionTransformation.FROM
+                        ),
                     )
 
                 self.log_metrics(metrics, iteration, time.time() - start)

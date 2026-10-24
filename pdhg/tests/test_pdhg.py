@@ -1,10 +1,10 @@
 import logging
 
-from common import linear_algebra
-from common.linear_algebra import DenseLinearOperator
 import numpy as np
 import pytest
-from common import lp_problem
+from common import linear_algebra, lp_problem
+from common.diagonal_scaling import DiagonalScaling, PreconditionTransformation
+from common.linear_algebra import DenseLinearOperator
 from common.preconditioning import (
     apply_diagonal_preconditioners,
     pock_chambolle_preconditioning,
@@ -189,7 +189,8 @@ class TestLpPreconditioning:
         preconditioning_matrix_d2 = np.array([1.0, 1.0])
 
         preconditioned_lp = apply_diagonal_preconditioners(
-            self.simple_lp, d1=preconditioning_matrix_d1, d2=preconditioning_matrix_d2
+            self.simple_lp,
+            DiagonalScaling(preconditioning_matrix_d1, preconditioning_matrix_d2),
         )
 
         # Since D2 is identity, variables should be the same
@@ -317,16 +318,22 @@ def test_preconditioning_give_correct_unpreconditioned_optimum() -> None:
     d1 = np.array([2.0, 1.3, 0.4, 0.95, 1.4])
     d2 = np.array([1.0, 2.0])
 
-    preconditioned_problem = apply_diagonal_preconditioners(problem, d1, d2)
+    preconditioned_problem = apply_diagonal_preconditioners(
+        problem, DiagonalScaling(d1, d2)
+    )
 
     assert preconditioned_problem.diagonal_preconditioning is not None
-    assert np.allclose(preconditioned_problem.diagonal_preconditioning[0], d1)
-    assert np.allclose(preconditioned_problem.diagonal_preconditioning[1], d2)
+    assert np.allclose(preconditioned_problem.diagonal_preconditioning.row_factors, d1)
+    assert np.allclose(
+        preconditioned_problem.diagonal_preconditioning.column_factors, d2
+    )
 
     x_preconditioned, y = pdlp.PdlpSolver(apply_preconditioning=False).solve(
         preconditioned_problem, (x0, y0), 20000
     )
-    x = preconditioned_problem.to_unpreconditioned_primal_variables(x_preconditioned)
+    x = preconditioned_problem.diagonal_preconditioning.transform_primal(
+        x_preconditioned, direction=PreconditionTransformation.FROM
+    )
     np.testing.assert_allclose(x, reference.x, atol=1e-6)
     assert problem.primal_feasibility_status(x, 1e-6).feasible()
     metrics = pdhg_tools.compute_optimality_metrics(
@@ -384,7 +391,7 @@ def test_rectangular_scaling_preserves_primal_and_dual() -> None:
         np.array([np.inf, 4.0, 5.0]),
     )
     d1, d2 = np.array([2.0, 3.0]), np.array([4.0, 5.0, 6.0])
-    scaled = apply_diagonal_preconditioners(problem, d1, d2)
+    scaled = apply_diagonal_preconditioners(problem, DiagonalScaling(d1, d2))
     x, y, r = (
         np.array([1.0, 0.0, 2.0]),
         np.array([2.0, -1.0]),
@@ -421,7 +428,7 @@ def test_invalid_scaling_diagonals() -> None:
         (np.ones(2), np.array([np.inf, 1.0])),
     ]:
         with pytest.raises(ValueError):
-            apply_diagonal_preconditioners(problem, d1, d2)
+            apply_diagonal_preconditioners(problem, DiagonalScaling(d1, d2))
 
 
 def test_simple_pock_chambolle_preconditioning() -> None:
@@ -442,8 +449,8 @@ def test_simple_pock_chambolle_preconditioning() -> None:
     alpha_1_problem = pock_chambolle_preconditioning(problem, alpha=1.0)
 
     assert alpha_1_problem.diagonal_preconditioning is not None
-    assert np.allclose(d1, alpha_1_problem.diagonal_preconditioning[0])
-    assert np.allclose(d2, alpha_1_problem.diagonal_preconditioning[1])
+    assert np.allclose(d1, alpha_1_problem.diagonal_preconditioning.row_factors)
+    assert np.allclose(d2, alpha_1_problem.diagonal_preconditioning.column_factors)
 
     # sqrt(1.0) ** 2, (sqrt(1.0) + sqrt(1.0)) ** 2, sqrt(1.0) ** 2
     column_norms_alpha_15 = np.array([1.0, 2.0 ** (1 / 1.5), 1.0])
@@ -455,8 +462,8 @@ def test_simple_pock_chambolle_preconditioning() -> None:
     alpha_15_problem = pock_chambolle_preconditioning(problem, alpha=1.5)
 
     assert alpha_15_problem.diagonal_preconditioning is not None
-    assert np.allclose(d1_15, alpha_15_problem.diagonal_preconditioning[0])
-    assert np.allclose(d2_15, alpha_15_problem.diagonal_preconditioning[1])
+    assert np.allclose(d1_15, alpha_15_problem.diagonal_preconditioning.row_factors)
+    assert np.allclose(d2_15, alpha_15_problem.diagonal_preconditioning.column_factors)
 
 
 def test_simple_ruiz_preconditioning() -> None:
@@ -477,5 +484,46 @@ def test_simple_ruiz_preconditioning() -> None:
     preconditioned_problem = ruiz_preconditioning(problem)
 
     assert preconditioned_problem.diagonal_preconditioning is not None
-    assert np.allclose(d1, preconditioned_problem.diagonal_preconditioning[0])
-    assert np.allclose(d2, preconditioned_problem.diagonal_preconditioning[1])
+    assert np.allclose(d1, preconditioned_problem.diagonal_preconditioning.row_factors)
+    assert np.allclose(
+        d2, preconditioned_problem.diagonal_preconditioning.column_factors
+    )
+
+
+def test_adaptive_step_calculation() -> None:
+    # Construct a really simple lp,
+    # minimize 0, x <= 1.
+    # Say we choose primal weight 1, we should see that a
+    problem = lp_problem.BoundedFormLP(
+        constraint_matrix=np.array([[1.0]]),
+        objective=np.array([0.0]),
+        row_lower=np.array([-np.inf]),
+        row_upper=np.array([1.0]),
+        variable_lower=np.array([-np.inf]),
+        variable_upper=np.array([np.inf]),
+    )
+    # solver = pdlp.PdlpSolver()
+    # (x,y) = solver.solve(problem, start_solution=(np.array([2.0]),np.array([2.0])), max_iterations=100)
+    # assert x[0] <= 1.0
+    # Take the point (x=0.0, y=1.0)
+    # The set \mathcal{X} is all of R so
+    # x' <- 10 * y = 10.0    (I have simplified the algorithm equations with ones and zeros inserted where they belong)
+    # y' <- y - 20x' - 10*max(-1, y/10 - 2x') = 1 - 200 - max(-1, -19.9) = -199 - (-1) = -198
+    # Omega norm is sqrt(10^2 + 198^2) ~ 198.25
+    # Condition is eta_bar = -198.25 / ((-199) * 1 * (10)) ~ 19.8
+    # Now, eta_bar is certainly not smaller than eta which is 10, so we should expect
+    # a smaller step size to emerge from the adaptive step
+    # The step size should be smaller that that which it, obviously, is not.
+    # This we expect to see a smaller stepsize than one after one step
+    step_size_params = pdhg_tools.PdhgStepSizeParameters(
+        primal_weight=1.0, step_size=10.0
+    )
+    (_x, _y), step_size_used, _prediction = pdhg_tools.adaptive_pdhg_step(
+        problem=problem,
+        step_size_parameters=step_size_params,
+        x=np.array([0.0]),
+        y=np.array([1.0]),
+        iteration=1,
+        logging=True,
+    )
+    assert step_size_used.step_size < step_size_params.step_size

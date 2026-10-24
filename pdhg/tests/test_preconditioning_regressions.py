@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 import numpy as np
 import pytest
+from common.diagonal_scaling import DiagonalScaling, PreconditionTransformation
 from common.lp_problem import BoundedFormLP
 from common.preconditioning import (
     apply_diagonal_preconditioners,
@@ -38,7 +39,10 @@ def test_zero_and_tiny_norms_are_left_unscaled(
     )
     scaled = scale(problem)
     assert scaled.diagonal_preconditioning is not None
-    for diagonal in scaled.diagonal_preconditioning:
+    for diagonal in (
+        scaled.diagonal_preconditioning.row_factors,
+        scaled.diagonal_preconditioning.column_factors,
+    ):
         np.testing.assert_array_equal(diagonal[:3], np.ones(3))
     np.testing.assert_array_equal(scaled.constraint_matrix[:3, :3], matrix[:3, :3])
     assert scaled.constraint_matrix[3, 3] == pytest.approx(1.0)
@@ -72,7 +76,7 @@ def test_nonzero_optimal_warm_start_stays_fixed(
     x0, y0 = np.array([2.0]), np.array([0.75])
     if already_scaled:
         problem = apply_diagonal_preconditioners(
-            problem, np.array([2.0]), np.array([3.0])
+            problem, DiagonalScaling(np.array([2.0]), np.array([3.0]))
         )
         x0, y0 = x0 / 3.0, y0 / 2.0
     before_x, before_y = x0.copy(), y0.copy()
@@ -93,17 +97,26 @@ def test_automatically_scaled_solve_returns_input_coordinates() -> None:
     the input problem's x=2/3 and would fail input feasibility.
     """
     problem = apply_diagonal_preconditioners(
-        _equality_problem(), np.array([2.0]), np.array([3.0])
+        _equality_problem(), DiagonalScaling(np.array([2.0]), np.array([3.0]))
     )
     x, y = pdlp.PdlpSolver().solve(problem, (np.zeros(1), np.zeros(1)), 10000)
     np.testing.assert_allclose(x, [2.0 / 3.0], atol=1e-7)
     np.testing.assert_allclose(y, [0.375], atol=1e-7)
     assert problem.primal_feasibility_status(x, 1e-6).feasible()
+    assert problem.diagonal_preconditioning is not None
     np.testing.assert_allclose(
-        problem.to_unpreconditioned_primal_variables(x), [2.0], atol=1e-7
+        problem.diagonal_preconditioning.transform_primal(
+            x, direction=PreconditionTransformation.FROM
+        ),
+        [2.0],
+        atol=1e-7,
     )
     np.testing.assert_allclose(
-        problem.to_unpreconditioned_dual_variables(y), [0.75], atol=1e-7
+        problem.diagonal_preconditioning.transform_dual(
+            y, direction=PreconditionTransformation.FROM
+        ),
+        [0.75],
+        atol=1e-7,
     )
 
 
@@ -125,7 +138,9 @@ def test_scaled_feasibility_does_not_terminate_solve(
         np.zeros(1),
         np.full(1, np.inf),
     )
-    scaled = apply_diagonal_preconditioners(problem, np.array([1e-8]), np.ones(1))
+    scaled = apply_diagonal_preconditioners(
+        problem, DiagonalScaling(np.array([1e-8]), np.ones(1))
+    )
     bad_x = np.array([1.0 + 1e-5])
     metrics = pdhg_tools.compute_optimality_metrics(scaled, bad_x, np.zeros(1))
     assert metrics.is_optimal(0.0, pdhg_tools.finite_row_bounds_norm(scaled), 1e-8)
@@ -137,3 +152,61 @@ def test_scaled_feasibility_does_not_terminate_solve(
     x, _ = pdlp.PdlpSolver().solve(problem, (np.zeros(1), np.zeros(1)), 2)
     assert primal_step.call_count == 2
     np.testing.assert_array_equal(x, np.ones(1))
+
+
+@pytest.mark.parametrize("scaled", [False, True])
+def test_explicit_transformation_directions(scaled: bool) -> None:
+    """TO divides and FROM multiplies; rectangular factors distinguish x and y.
+
+    Check known values as well as round trips so two reversed methods cannot
+    accidentally pass together. No scaling must act as identity in either direction.
+    """
+    problem = BoundedFormLP(
+        np.ones((2, 3)),
+        np.ones(3),
+        np.zeros(2),
+        np.ones(2),
+        np.zeros(3),
+        np.ones(3),
+    )
+    if scaled:
+        problem = apply_diagonal_preconditioners(
+            problem, DiagonalScaling(np.array([2.0, 4.0]), np.array([3.0, 5.0, 7.0]))
+        )
+    x, y = np.array([6.0, 10.0, 14.0]), np.array([8.0, 12.0])
+    before_x, before_y = x.copy(), y.copy()
+    scaling = problem.diagonal_preconditioning or DiagonalScaling(
+        np.ones(2), np.ones(3)
+    )
+    xs = scaling.transform_primal(x, direction=PreconditionTransformation.TO)
+    ys = scaling.transform_dual(y, direction=PreconditionTransformation.TO)
+    np.testing.assert_allclose(xs, [2.0, 2.0, 2.0] if scaled else x)
+    np.testing.assert_allclose(ys, [4.0, 3.0] if scaled else y)
+    np.testing.assert_allclose(
+        scaling.transform_primal(xs, direction=PreconditionTransformation.FROM), x
+    )
+    np.testing.assert_allclose(
+        scaling.transform_dual(ys, direction=PreconditionTransformation.FROM), y
+    )
+    np.testing.assert_array_equal(x, before_x)
+    np.testing.assert_array_equal(y, before_y)
+
+
+@pytest.mark.parametrize("bad_factor", [0.0, -1.0, np.inf, np.nan])
+def test_scaling_rejects_noninvertible_factors(bad_factor: float) -> None:
+    """Both directions require finite, positive factors on either axis."""
+    with pytest.raises(ValueError):
+        DiagonalScaling(np.array([bad_factor]), np.ones(2))
+    with pytest.raises(ValueError):
+        DiagonalScaling(np.ones(2), np.array([bad_factor]))
+
+
+def test_scaling_rejects_broadcasting() -> None:
+    """A scalar-length vector must not silently broadcast across coordinates."""
+    scaling = DiagonalScaling(np.ones(2), np.ones(3))
+    with pytest.raises(ValueError):
+        scaling.transform_primal(np.ones(1), direction=PreconditionTransformation.TO)
+    with pytest.raises(ValueError):
+        scaling.transform_dual(np.ones(1), direction=PreconditionTransformation.FROM)
+    with pytest.raises(ValueError):
+        DiagonalScaling(np.ones((2, 1)), np.ones(3))

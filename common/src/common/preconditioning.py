@@ -2,11 +2,11 @@
 
 import numpy as np
 from common import lp_problem
-from common.numpy_type_aliases import ArrayF
+from common.diagonal_scaling import DiagonalScaling, PreconditionTransformation
 
 
 def apply_diagonal_preconditioners(
-    lp: lp_problem.BoundedFormLP, d1: ArrayF, d2: ArrayF
+    lp: lp_problem.BoundedFormLP, scaling: DiagonalScaling
 ) -> lp_problem.BoundedFormLP:
     """For positive diagonal D1, D2, form A_scaled = D1 A D2.
 
@@ -15,31 +15,33 @@ def apply_diagonal_preconditioners(
     r = D2^-1 r_scaled. Objectives are unchanged. This applies supplied
     diagonals only; choosing Ruiz/Pock-Chambolle diagonals remains separate.
     """
+    rows = scaling.row_factors
+    columns = scaling.column_factors
     m, n = lp.constraint_matrix.shape
-    if d1.shape != (m,) or d2.shape != (n,):
+    if rows.shape != (m,) or columns.shape != (n,):
         raise ValueError("Expected row scaling (m,) and column scaling (n,).")
-    if any(not np.all(np.isfinite(d)) or np.any(d <= 0) for d in (d1, d2)):
-        raise ValueError("Scaling diagonals must be finite and strictly positive.")
 
-    total_d1 = (
-        d1
-        if lp.diagonal_preconditioning is None
-        else d1 * lp.diagonal_preconditioning[0]
-    )
-    total_d2 = (
-        d2
-        if lp.diagonal_preconditioning is None
-        else d2 * lp.diagonal_preconditioning[1]
-    )
+    # Apply only the new factors to the current LP; retain the composed map
+    # for recovery all the way back to the problem before any scaling.
+    total_scaling = scaling
+    if lp.diagonal_preconditioning is not None:
+        total_scaling = DiagonalScaling(
+            row_factors=rows * lp.diagonal_preconditioning.row_factors,
+            column_factors=columns * lp.diagonal_preconditioning.column_factors,
+        )
 
     return lp_problem.BoundedFormLP(
-        constraint_matrix=d1[:, None] * lp.constraint_matrix * d2,
-        objective=d2 * lp.objective,
-        row_lower=d1 * lp.row_lower,
-        row_upper=d1 * lp.row_upper,
-        variable_lower=lp.variable_lower / d2,
-        variable_upper=lp.variable_upper / d2,
-        diagonal_preconditioning=(total_d1, total_d2),
+        constraint_matrix=rows[:, None] * lp.constraint_matrix * columns[None, :],
+        objective=columns * lp.objective,
+        row_lower=rows * lp.row_lower,
+        row_upper=rows * lp.row_upper,
+        variable_lower=scaling.transform_primal(
+            lp.variable_lower, direction=PreconditionTransformation.TO
+        ),
+        variable_upper=scaling.transform_primal(
+            lp.variable_upper, direction=PreconditionTransformation.TO
+        ),
+        diagonal_preconditioning=total_scaling,
     )
 
 
@@ -78,7 +80,9 @@ def pock_chambolle_preconditioning(
     d1[non_zero_mask_d1] = 1 / np.sqrt(a_row_norms[non_zero_mask_d1])
     d2[non_zero_mask_d2] = 1 / np.sqrt(a_column_norms[non_zero_mask_d2])
 
-    return apply_diagonal_preconditioners(lp, d1, d2)
+    return apply_diagonal_preconditioners(
+        lp, DiagonalScaling(row_factors=d1, column_factors=d2)
+    )
 
 
 def ruiz_preconditioning(lp: lp_problem.BoundedFormLP) -> lp_problem.BoundedFormLP:
@@ -107,7 +111,9 @@ def ruiz_preconditioning(lp: lp_problem.BoundedFormLP) -> lp_problem.BoundedForm
     d1[non_zero_mask_d1] = 1 / np.sqrt(a_row_max[non_zero_mask_d1])
     d2[non_zero_mask_d2] = 1 / np.sqrt(a_column_max[non_zero_mask_d2])
 
-    return apply_diagonal_preconditioners(lp, d1, d2)
+    return apply_diagonal_preconditioners(
+        lp, DiagonalScaling(row_factors=d1, column_factors=d2)
+    )
 
 
 def pdlp_preconditioning(lp: lp_problem.BoundedFormLP) -> lp_problem.BoundedFormLP:

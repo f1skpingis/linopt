@@ -21,3 +21,14 @@ objective offsets, and solution recovery. The existing Netlib helper only
 adds slack/surplus variables and retains its existing limitations.
 
 See `pdhg/README.md` for paper conventions, scaling, and the learning roadmap.
+
+`common.diagonal_scaling.DiagonalScaling` holds named `row_factors` and
+`column_factors`, validates positive finite vectors, and owns the coordinate
+transformations. Use `transform_primal` or `transform_dual` with the required
+keyword `direction=PreconditionTransformation.TO` (divide by the factors) or
+`.FROM` (multiply). Identity scaling uses vectors of ones.
+
+`BoundedFormLP.diagonal_preconditioning` optionally stores this object as the
+accumulated map from the problem before preprocessing. The solver keeps a
+separate map for only its own preprocessing: warm starts, returned solutions,
+and optimality checks are always in the supplied problem's coordinates.
