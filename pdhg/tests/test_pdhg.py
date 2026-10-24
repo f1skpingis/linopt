@@ -1,9 +1,15 @@
 import logging
 
+from common import linear_algebra
+from common.linear_algebra import DenseLinearOperator
 import numpy as np
 import pytest
 from common import lp_problem
-from common.preconditioning import apply_diagonal_precoditioners
+from common.preconditioning import (
+    apply_diagonal_preconditioners,
+    pock_chambolle_preconditioning,
+    ruiz_preconditioning,
+)
 from scipy.optimize import linprog
 
 # TODO(martin): Typo, call something else, maybe pdlp
@@ -27,7 +33,7 @@ class TestPowerIteration:
         spectral_norm = np.linalg.norm(k, 2)
 
         power_iteration_result = pdhg_tools.iterative_spectral_norm(
-            pdhg_tools.DenseLinearOperator(k)
+            DenseLinearOperator(k)
         )
 
         assert np.isclose(
@@ -58,9 +64,7 @@ def test_vstack() -> None:
         ]
     )
 
-    stacked_op = pdhg_tools.vstack(
-        pdhg_tools.DenseLinearOperator(a1), pdhg_tools.DenseLinearOperator(a2)
-    )
+    stacked_op = linear_algebra.vstack(DenseLinearOperator(a1), DenseLinearOperator(a2))
     manually_stacked_op = np.array([*a1, *a2])
 
     test_vec_r = np.array([1, -2, 3, -4])
@@ -184,7 +188,7 @@ class TestLpPreconditioning:
         preconditioning_matrix_d1 = np.array([10.0, 20.0])
         preconditioning_matrix_d2 = np.array([1.0, 1.0])
 
-        preconditioned_lp = apply_diagonal_precoditioners(
+        preconditioned_lp = apply_diagonal_preconditioners(
             self.simple_lp, d1=preconditioning_matrix_d1, d2=preconditioning_matrix_d2
         )
 
@@ -226,7 +230,7 @@ def test_dual_update_all_row_types() -> None:
         np.full(5, -np.inf),
         np.full(5, np.inf),
     )
-    op = pdhg_tools.DenseLinearOperator(problem.constraint_matrix)
+    op = DenseLinearOperator(problem.constraint_matrix)
     actual = pdhg_tools.dual_update(
         problem, op, np.array([0.0, 4.0, 0.0, 3.0, 20.0]), np.zeros(5), 0.5
     )
@@ -270,8 +274,63 @@ def test_bounded_solver_against_highs() -> None:
     x, y = pdlp.PdlpSolver().solve(problem, (x0, y0), 20000)
     np.testing.assert_allclose(x, reference.x, atol=1e-6)
     assert problem.primal_feasibility_status(x, 1e-6).feasible()
+    metrics = pdhg_tools.compute_optimality_metrics(problem, x, y)
+    # Agreement of objectives checks recovered reduced costs and dual signs,
+    # beyond merely reaching a primal solution close to the reference.
+    assert abs(metrics.primal_objective - metrics.dual_objective) < 1e-6
+    # Solving should not overwrite the caller's warm-start arrays.
+    np.testing.assert_array_equal(x0, np.zeros(2))
+    np.testing.assert_array_equal(y0, np.zeros(5))
+
+
+def test_preconditioning_give_correct_unpreconditioned_optimum() -> None:
+    """Optimize preconditioned and unpreconditioned and check that solution
+    is reported equal in the unpreconditioned coordinates.
+
+    First we solve the LP with HiGHS and then we solve it, preconditioned
+    with PDHG and compare original coordinate system variable values
+    """
+    # An equality, lower-only, upper-only and ranged row, and a free row.
+    a = np.array([[1.0, 1.0], [1.0, 0.0], [0.0, 1.0], [1.0, -1.0], [2.0, 1.0]])
+    problem = lp_problem.BoundedFormLP(
+        constraint_matrix=a,
+        objective=np.array([1.0, -2.0]),
+        row_lower=np.array([2.0, 0.25, -np.inf, -0.5, -np.inf]),
+        row_upper=np.array([2.0, np.inf, 1.5, 0.75, np.inf]),
+        variable_lower=np.array([-1.0, 0.0]),
+        variable_upper=np.array([3.0, 3.0]),
+    )
+
+    reference = linprog(
+        problem.objective,
+        A_eq=a[:1],
+        b_eq=[2.0],
+        A_ub=np.array([-a[1], a[2], a[3], -a[3]]),
+        b_ub=[-0.25, 1.5, 0.75, 0.5],
+        bounds=[(-1.0, 3.0), (0.0, 3.0)],
+        method="highs",
+    )
+    assert reference.success
+    x0, y0 = np.zeros(2), np.zeros(5)
+
+    # Some arbitrary preconditioning.
+    d1 = np.array([2.0, 1.3, 0.4, 0.95, 1.4])
+    d2 = np.array([1.0, 2.0])
+
+    preconditioned_problem = apply_diagonal_preconditioners(problem, d1, d2)
+
+    assert preconditioned_problem.diagonal_preconditioning is not None
+    assert np.allclose(preconditioned_problem.diagonal_preconditioning[0], d1)
+    assert np.allclose(preconditioned_problem.diagonal_preconditioning[1], d2)
+
+    x_preconditioned, y = pdlp.PdlpSolver(apply_preconditioning=False).solve(
+        preconditioned_problem, (x0, y0), 20000
+    )
+    x = preconditioned_problem.to_unpreconditioned_primal_variables(x_preconditioned)
+    np.testing.assert_allclose(x, reference.x, atol=1e-6)
+    assert problem.primal_feasibility_status(x, 1e-6).feasible()
     metrics = pdhg_tools.compute_optimality_metrics(
-        problem, pdhg_tools.DenseLinearOperator(a), x, y
+        preconditioned_problem, x_preconditioned, y
     )
     # Agreement of objectives checks recovered reduced costs and dual signs,
     # beyond merely reaching a primal solution close to the reference.
@@ -325,7 +384,7 @@ def test_rectangular_scaling_preserves_primal_and_dual() -> None:
         np.array([np.inf, 4.0, 5.0]),
     )
     d1, d2 = np.array([2.0, 3.0]), np.array([4.0, 5.0, 6.0])
-    scaled = apply_diagonal_precoditioners(problem, d1, d2)
+    scaled = apply_diagonal_preconditioners(problem, d1, d2)
     x, y, r = (
         np.array([1.0, 0.0, 2.0]),
         np.array([2.0, -1.0]),
@@ -362,4 +421,61 @@ def test_invalid_scaling_diagonals() -> None:
         (np.ones(2), np.array([np.inf, 1.0])),
     ]:
         with pytest.raises(ValueError):
-            apply_diagonal_precoditioners(problem, d1, d2)
+            apply_diagonal_preconditioners(problem, d1, d2)
+
+
+def test_simple_pock_chambolle_preconditioning() -> None:
+    problem = lp_problem.BoundedFormLP(
+        np.array([[1.0, 1.0, 0.0], [0.0, 1.0, 1.0]]),
+        np.array([2.0, -1.0, 3.0]),
+        np.array([1.0, -np.inf]),
+        np.array([1.0, 3.0]),
+        np.array([0.0, -np.inf, -2.0]),
+        np.array([np.inf, 4.0, 5.0]),
+    )
+    column_norms_alpha_1 = np.array([1.0, 2.0, 1.0])
+    row_norms_alpha_1 = np.array([2.0, 2.0])
+
+    d1 = 1 / np.sqrt(row_norms_alpha_1)
+    d2 = 1 / np.sqrt(column_norms_alpha_1)
+
+    alpha_1_problem = pock_chambolle_preconditioning(problem, alpha=1.0)
+
+    assert alpha_1_problem.diagonal_preconditioning is not None
+    assert np.allclose(d1, alpha_1_problem.diagonal_preconditioning[0])
+    assert np.allclose(d2, alpha_1_problem.diagonal_preconditioning[1])
+
+    # sqrt(1.0) ** 2, (sqrt(1.0) + sqrt(1.0)) ** 2, sqrt(1.0) ** 2
+    column_norms_alpha_15 = np.array([1.0, 2.0 ** (1 / 1.5), 1.0])
+    row_norms_alpha_15 = np.array([4.0, 4.0])
+
+    d1_15 = 1 / np.sqrt(row_norms_alpha_15)
+    d2_15 = 1 / np.sqrt(column_norms_alpha_15)
+
+    alpha_15_problem = pock_chambolle_preconditioning(problem, alpha=1.5)
+
+    assert alpha_15_problem.diagonal_preconditioning is not None
+    assert np.allclose(d1_15, alpha_15_problem.diagonal_preconditioning[0])
+    assert np.allclose(d2_15, alpha_15_problem.diagonal_preconditioning[1])
+
+
+def test_simple_ruiz_preconditioning() -> None:
+    problem = lp_problem.BoundedFormLP(
+        np.array([[10.0, -4.0, 0.0], [0.0, 1.0, 2.0]]),
+        np.array([2.0, -1.0, 3.0]),
+        np.array([1.0, -np.inf]),
+        np.array([1.0, 3.0]),
+        np.array([0.0, -np.inf, -2.0]),
+        np.array([np.inf, 4.0, 5.0]),
+    )
+    column_inf_norms = np.array([10.0, 4.0, 2.0])
+    row_inf_norms = np.array([10.0, 2.0])
+
+    d1 = 1 / np.sqrt(row_inf_norms)
+    d2 = 1 / np.sqrt(column_inf_norms)
+
+    preconditioned_problem = ruiz_preconditioning(problem)
+
+    assert preconditioned_problem.diagonal_preconditioning is not None
+    assert np.allclose(d1, preconditioned_problem.diagonal_preconditioning[0])
+    assert np.allclose(d2, preconditioned_problem.diagonal_preconditioning[1])

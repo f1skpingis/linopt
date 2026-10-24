@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from functools import cached_property
 
+from common.linear_algebra import DenseLinearOperator, LinearOperator
 import numpy as np
 from scipy import sparse
 
@@ -125,6 +126,9 @@ class BoundedFormLP:
     variable_lower: ArrayF
     variable_upper: ArrayF
 
+    # Holds D1 and D2 if it has been predonditioned
+    diagonal_preconditioning: tuple[ArrayF, ArrayF] | None = None
+
     def __post_init__(self) -> None:
         _validate_matrix_objective(self.constraint_matrix, self.objective)
         m, n = self.constraint_matrix.shape
@@ -134,6 +138,11 @@ class BoundedFormLP:
     @property
     def num_variables(self) -> int:
         return self.objective.size
+
+    @cached_property
+    def lin_op_a(self) -> LinearOperator:
+        # Should be easy to switch out for Sparse linear operator
+        return DenseLinearOperator(self.constraint_matrix)
 
     def primal_feasibility_status(
         self, x: ArrayF, tolerance: float
@@ -157,6 +166,16 @@ class BoundedFormLP:
             ),
             tolerance,
         )
+
+    def to_unpreconditioned_primal_variables(self, x: ArrayF) -> ArrayF:
+        if self.diagonal_preconditioning is None:
+            return x
+        return self.diagonal_preconditioning[1] * x
+
+    def to_unpreconditioned_dual_variables(self, y: ArrayF) -> ArrayF:
+        if self.diagonal_preconditioning is None:
+            return y
+        return self.diagonal_preconditioning[0] * y
 
     def dual_feasibility_status(
         self,

@@ -1,3 +1,5 @@
+from typing import Sequence
+
 import numpy as np
 import pytest
 
@@ -15,7 +17,7 @@ def mixed_problem() -> BoundedFormLP:
     )
 
 
-def test_feasibility():
+def test_feasibility() -> None:
     status = mixed_problem().primal_feasibility_status(np.array([1.0, 9.0, 100.0]), 0.0)
     assert status.feasible()
     assert status.row_bounds == status.variable_bounds == 0.0
@@ -30,13 +32,13 @@ def test_feasibility():
         ([0.5, 9.0, 100.0], "row_bounds", 0.5),
     ],
 )
-def test_violation_magnitudes(x, field, expected):
+def test_violation_magnitudes(x: Sequence[float], field: str, expected: float) -> None:
     status = mixed_problem().primal_feasibility_status(np.array(x), 1e-6)
     assert not status.feasible()
     assert getattr(status, field) == pytest.approx(expected)
 
 
-def test_tolerance():
+def test_tolerance() -> None:
     lp = mixed_problem()
     x = np.array([0.5, 9.0, 100.0])
     assert lp.primal_feasibility_status(x, 0.5).feasible()
@@ -44,7 +46,7 @@ def test_tolerance():
     assert not lp.primal_feasibility_status(np.full(3, np.nan), 0.5).feasible()
 
 
-def test_standard_form_embedding():
+def test_standard_form_embedding() -> None:
     lp = StandardFormLP(np.array([[1.0, 1.0]]), np.array([1.0]), np.array([2.0, 3.0]))
     bounded = lp.to_bounded_form()
     assert bounded.primal_feasibility_status(np.array([1.0, 0.0]), 0.0).feasible()
@@ -56,7 +58,7 @@ def test_standard_form_embedding():
 @pytest.mark.parametrize(
     "lower,upper", [(np.nan, 1.0), (2.0, 1.0), (np.inf, np.inf), (-np.inf, -np.inf)]
 )
-def test_invalid_bounds(lower, upper):
+def test_invalid_bounds(lower: float, upper: float) -> None:
     with pytest.raises(ValueError):
         BoundedFormLP(
             np.eye(1),
@@ -68,12 +70,12 @@ def test_invalid_bounds(lower, upper):
         )
 
 
-def test_rhs_must_be_vector():
+def test_rhs_must_be_vector() -> None:
     with pytest.raises(ValueError):
         StandardFormLP(np.eye(2), np.ones((2, 1)), np.zeros(2))
 
 
-def test_dual_feasibility_domains_and_stationarity():
+def test_dual_feasibility_domains_and_stationarity() -> None:
     lp = BoundedFormLP(
         np.eye(4),
         np.array([2.0, -2.0, 3.0, 0.0]),

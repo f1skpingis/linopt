@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Protocol
 
 import numpy as np
 from common import lp_problem
+from common.linear_algebra import LinearOperator
 from common.lp_problem import dual_domain_projection
 from common.numpy_type_aliases import ArrayF
 
@@ -34,65 +34,6 @@ class PdhgStepSizeParameters:
     @property
     def dual_step_size(self) -> float:
         return self.step_size * self.primal_weight
-
-
-class LinearOperator(Protocol):
-    @property
-    def shape(self) -> tuple[int, int]: ...
-
-    def matvec(self, x: ArrayF) -> ArrayF: ...
-
-    def rmatvec(self, y: ArrayF) -> ArrayF: ...
-
-
-@dataclass(frozen=True)
-class VStackOperator:
-    operators: tuple[LinearOperator, ...]
-
-    @property
-    def shape(self) -> tuple[int, int]:
-        n = self.operators[0].shape[1]
-
-        if any(op.shape[1] != n for op in self.operators):
-            raise ValueError("All operators must have the same input dimension")
-
-        return (
-            sum(op.shape[0] for op in self.operators),
-            n,
-        )
-
-    def matvec(self, x: ArrayF) -> ArrayF:
-        return np.concatenate([op.matvec(x) for op in self.operators])
-
-    def rmatvec(self, y: ArrayF) -> ArrayF:
-        offset = 0
-        result = np.zeros(self.shape[1], dtype=y.dtype)
-
-        for op in self.operators:
-            m = op.shape[0]
-            result += op.rmatvec(y[offset : offset + m])
-            offset += m
-
-        return result
-
-
-def vstack(*operators: LinearOperator) -> LinearOperator:
-    return VStackOperator(tuple(operators))
-
-
-class DenseLinearOperator:
-    def __init__(self, a: ArrayF) -> None:
-        self.a = a
-
-    @property
-    def shape(self) -> tuple[int, int]:
-        return self.a.shape
-
-    def matvec(self, x: ArrayF) -> ArrayF:
-        return self.a @ x
-
-    def rmatvec(self, y: ArrayF) -> ArrayF:
-        return self.a.T @ y
 
 
 class PowerIterationStatus(StrEnum):
@@ -241,14 +182,14 @@ def finite_row_bounds_norm(problem: lp_problem.BoundedFormLP) -> float:
 
 
 def compute_optimality_metrics(
-    problem: lp_problem.BoundedFormLP, a: LinearOperator, x: ArrayF, y: ArrayF
+    problem: lp_problem.BoundedFormLP, x: ArrayF, y: ArrayF
 ) -> PdhgOptimalityMetrics:
-    raw_reduced_costs = problem.objective - a.rmatvec(y)
+    raw_reduced_costs = problem.objective - problem.lin_op_a.rmatvec(y)
     r = dual_domain_projection(
         problem.variable_lower, problem.variable_upper, raw_reduced_costs
     )
     projected_y = dual_domain_projection(problem.row_lower, problem.row_upper, y)
-    ax = a.matvec(x)
+    ax = problem.lin_op_a.matvec(x)
     row_violation = ax - np.clip(ax, problem.row_lower, problem.row_upper)
     variable_violation = x - np.clip(x, problem.variable_lower, problem.variable_upper)
     primal = float(problem.objective @ x)

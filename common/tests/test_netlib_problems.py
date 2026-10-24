@@ -169,10 +169,27 @@ def test_netlib_dual_simplex(
     assert np.isclose(obtained_optimum, optimum)
 
 
-# AFIRO — vanilla PDHG
-# tol=1e-4   15,200 iterations   0.18 s
-# tol=1e-6   19,200 iterations   0.23 s
+# AFIRO — vanilla PDHG 
 # tol=1e-8   23,800 iterations   0.27 s
+# Diagonal preconditioning
+# tol=1e-8   5,600             0.055 s
+# SCSD1 - vanilla PDHG
+# tol=1e-8   35,300 iterations.   0.51 s
+# Diagonal preconditioning
+# tol=1e-8   30,800               0.43 s
+# Adlittle - vanilla PDGH
+# tol=1e-8.  fail
+# Digaonal preconditioning
+# tol=1e-8. 212,200 iterations 2.2s
+# Bandm - vanilla PDHG
+# tol=1e-8 fail
+# Diagonal preconditioning
+# tol=1e-8 fail
+# SCSD6 - vanilla PDHG
+# tol=1e-8 Didn't even start solve, spectral norm power iteration failed.
+# tol=1e-8 170700 3.5s
+# Diagonal preconditioning
+# tol=1e-8 231800 4.8s
 @pytest.mark.parametrize("name", PROBLEMS_TO_TEST)
 def test_netlib_pdhg(
     name: str, cached_lp_problems: dict[str, lp_problem.StandardFormLP]

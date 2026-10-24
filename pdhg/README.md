@@ -71,7 +71,7 @@ y_original = D1 y_scaled
 r_original = D2^-1 r_scaled
 ```
 
-The existing misspelled `apply_diagonal_precoditioners` name remains an alias.
+The existing misspelled `apply_diagonal_preconditioners` name remains an alias.
 Ruiz and Pock-Chambolle diagonal selection are still unimplemented exercises.
 Adaptive step sizes, primal-weight updates, restarts, feasibility polishing,
 and infeasibility detection are also left for subsequent work.
